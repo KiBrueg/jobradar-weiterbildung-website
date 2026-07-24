@@ -598,7 +598,7 @@ export default function CeoCockpit() {
             <h3 className="font-display text-base font-semibold text-ink-900 mb-1 flex items-center gap-2"><FileText className="h-4 w-4 text-brand-600" />CEO Report — {rangeLabel(timeRange)}</h3>
             <p className="text-xs text-ink-500 mb-4">Statistik für Management, Kostenkontrolle und Arbeitsmarktnachweis.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <button onClick={() => toast(`${rangeLabel(timeRange)}-Report wurde vorbereitet.`, 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> {rangeLabel(timeRange)}-Report</button>
+              <button onClick={() => toast(`Demo: ${rangeLabel(timeRange)}-Report wurde vorbereitet.`, 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> {rangeLabel(timeRange)}-Report</button>
               <button onClick={() => toast('Demo: Jahresreport wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Jahresreport</button>
               <button onClick={() => toast('Demo: ROI-Report wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> ROI-Report</button>
               <button onClick={() => toast('Demo: Kostenbericht wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Kostenbericht</button>
