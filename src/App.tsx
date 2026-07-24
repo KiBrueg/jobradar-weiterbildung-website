@@ -42,6 +42,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <a href="#main-content" className="skip-link">Zum Hauptinhalt springen</a>
       {route === 'admin' ? <AdminDashboard /> : route === 'referenzen' ? <ReferencesPage /> : <LandingPage />}
     </ToastProvider>
   );
