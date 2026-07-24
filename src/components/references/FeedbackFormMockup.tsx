@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, Send, Info } from 'lucide-react';
+import { Send, Info } from 'lucide-react';
 import { useToast } from '@/components/Toast';
 
 export default function FeedbackFormMockup() {

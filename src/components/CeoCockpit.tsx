@@ -205,9 +205,6 @@ function calculateDashboardKpis(data: DashboardData): DashboardKpis {
   };
 }
 
-async function loadDashboard(range: TimeRange): Promise<DashboardData> {
-  return dashboardDataByRange[range];
-}
 
 const sparkData = (base: number, variance: number, seed: number): number[] => {
   const result: number[] = [];

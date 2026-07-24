@@ -17,7 +17,7 @@ import {
   Sparkles,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goReferenzen } from '@/App';
+import { goAdmin, goBarrierefreiheit, goDatenschutz, goImpressum, goKontakt, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
 
 const navItems = [
@@ -399,11 +399,12 @@ export default function LandingPage() {
               </div>
               <p className="mt-3 text-sm text-ink-500">KI-gestuetzt, menschlich geprueft.</p>
             </div>
-            <nav className="flex flex-wrap gap-6 text-sm">
+            <nav className="flex flex-wrap gap-6 text-sm" aria-label="Rechtliche Navigation">
               <button onClick={() => goReferenzen()} className="text-ink-500 hover:text-ink-900 transition-colors">Referenzen</button>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Impressum</a>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Datenschutz</a>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Kontakt</a>
+              <button onClick={goImpressum} className="text-ink-500 hover:text-ink-900 transition-colors">Impressum</button>
+              <button onClick={goDatenschutz} className="text-ink-500 hover:text-ink-900 transition-colors">Datenschutz</button>
+              <button onClick={goBarrierefreiheit} className="text-ink-500 hover:text-ink-900 transition-colors">Barrierefreiheit</button>
+              <button onClick={goKontakt} className="text-ink-500 hover:text-ink-900 transition-colors">Kontakt</button>
             </nav>
           </div>
           <div className="mt-8 pt-6 border-t border-ink-200 text-xs text-ink-400">

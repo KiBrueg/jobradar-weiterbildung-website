@@ -3,22 +3,13 @@ import {
   Search as SearchIcon,
   Download,
   Menu,
-  School as SchoolIcon,
-  BookOpen,
-  Radar,
-  ShieldCheck,
-  Gauge,
-  Server,
-  Workflow,
   Database,
-  CheckCircle2,
   Plus,
   Pencil,
   Archive,
   FileText,
   GitPullRequestArrow,
   FileBarChart,
-  Filter,
   Copy,
   Check,
   X,
@@ -26,14 +17,11 @@ import {
   Eye,
   Code2,
   AlertTriangle,
-  Info,
   Trash2,
   RotateCcw,
   Zap,
-  Globe,
 } from 'lucide-react';
 import Sidebar, { sections, type SectionKey } from '@/components/Sidebar';
-import KpiCard from '@/components/KpiCard';
 import CeoCockpit from '@/components/CeoCockpit';
 import {
   StatusBadge,

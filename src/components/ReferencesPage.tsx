@@ -10,11 +10,10 @@ import {
   FileBarChart,
   ClipboardCheck,
   Quote,
-  ArrowLeft,
 } from 'lucide-react';
-import { goAdmin, goLanding, goReferenzen } from '@/App';
+import { goAdmin, goBarrierefreiheit, goDatenschutz, goImpressum, goKontakt, goLanding, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
-import { PageSection, SectionHeading, IconCard, PlaceholderBanner } from '@/components/references/ui';
+import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
 import FeedbackStatusCard from '@/components/references/FeedbackStatusCard';
 import FutureReviewSources from '@/components/references/FutureReviewSources';
 import FeedbackFormMockup from '@/components/references/FeedbackFormMockup';
@@ -280,13 +279,14 @@ export default function ReferencesPage() {
               </button>
               <p className="mt-3 text-sm text-ink-500">KI-gestuetzt, menschlich geprueft.</p>
             </div>
-            <nav className="flex flex-wrap gap-6 text-sm">
+            <nav className="flex flex-wrap gap-6 text-sm" aria-label="Rechtliche Navigation">
               <button onClick={goLanding} className="text-ink-500 hover:text-ink-900 transition-colors">Uebersicht</button>
               <button onClick={goReferenzen} className="text-ink-500 hover:text-ink-900 transition-colors">Referenzen</button>
               <button onClick={goAdmin} className="text-ink-500 hover:text-ink-900 transition-colors">Admin Demo</button>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Impressum</a>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Datenschutz</a>
-              <a href="#" className="text-ink-500 hover:text-ink-900 transition-colors">Kontakt</a>
+              <button onClick={goImpressum} className="text-ink-500 hover:text-ink-900 transition-colors">Impressum</button>
+              <button onClick={goDatenschutz} className="text-ink-500 hover:text-ink-900 transition-colors">Datenschutz</button>
+              <button onClick={goBarrierefreiheit} className="text-ink-500 hover:text-ink-900 transition-colors">Barrierefreiheit</button>
+              <button onClick={goKontakt} className="text-ink-500 hover:text-ink-900 transition-colors">Kontakt</button>
             </nav>
           </div>
           <div className="mt-8 pt-6 border-t border-ink-200 text-xs text-ink-400">
