@@ -325,7 +325,7 @@ export default function AdminDashboard() {
         {/* Header */}
         <header className="sticky top-0 z-20 glass border-b border-ink-200/60">
           <div className="flex h-16 items-center gap-3 px-4 sm:px-6">
-            <button onClick={() => setSidebarOpen(true)} className="lg:hidden btn-ghost px-2" aria-label="Menue">
+            <button onClick={() => setSidebarOpen(true)} className="lg:hidden btn-ghost px-2" aria-label="Navigation öffnen" aria-expanded={sidebarOpen} aria-controls="sidebar-nav">
               <Menu className="h-5 w-5" />
             </button>
             <h1 className="font-display text-lg font-semibold tracking-tight text-ink-900">{activeSection.label}</h1>
@@ -343,7 +343,7 @@ export default function AdminDashboard() {
           </div>
         </header>
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1400px] w-full mx-auto">
+        <main id="main-content" className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1400px] w-full mx-auto" role="main">
           {/* ===== OVERVIEW ===== */}
           {section === 'overview' && <CeoCockpit />}
 
@@ -646,7 +646,7 @@ export default function AdminDashboard() {
                     { l: 'Matched Leads', v: kpiValues.leadsDieseWoche },
                     { l: 'Dokumente', v: docs.length },
                     { l: 'Offene QA', v: kpiValues.qaOffen },
-                    { l: 'OE Score', v: kpiValues.avgScore },
+                    { l: 'Ø Score', v: kpiValues.avgScore },
                   ].map((k) => (
                     <div key={k.l} className="rounded-xl border border-ink-200/70 bg-ink-50/50 p-4">
                       <div className="font-display text-2xl font-semibold tabular-nums">{k.v}</div>
