@@ -156,6 +156,7 @@ function GaugeIndicator({ value, size = 200 }: { value: number; size?: number })
   const circumference = Math.PI * radius;
   const pct = value / 100;
   const dash = circumference * pct;
+  const angle = pct * 180;
 
   return (
     <div className="relative flex flex-col items-center" style={{ width: size }}>
@@ -241,7 +242,7 @@ export default function CeoCockpit() {
         icon: Clock,
         iconColor: 'bg-brand-50 text-brand-600',
         formula: 'Manuelle Recherchezeit − Automatisierte Recherchezeit',
-        explanation: 'Absolute Stunden, die durch Automatisierung eingespart werden.',
+        explanation: 'Absolute Stunden, die durch Automatisierung eingespain werden.',
         action: 'Mehr Kurse mit Suchprofilen verknüpfen, um Skalierungseffekt zu erhöhen.',
       },
       {
@@ -412,7 +413,7 @@ export default function CeoCockpit() {
               style={{ animationDelay: `${i * 40}ms` }}
             >
               <div className="flex items-center justify-between">
-                <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${kpi.iconColor}">
+                <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${kpi.iconColor}`}>
                   <Icon className="h-4 w-4" strokeWidth={2} />
                 </span>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${statusBadgeColor(kpi.statusColor)}`}>
