@@ -16,12 +16,17 @@ export default function CaseStudyTemplate() {
   return (
     <div className="card p-6 md:p-8 max-w-3xl">
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">
-        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ink-100 text-ink-600"><FileText className="h-5 w-5" /></span>
+        <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-ink-100 text-ink-600">
+          <FileText className="h-5 w-5" />
+        </span>
         <div className="flex-1">
           <PlaceholderBanner>Template — noch nicht veroeffentlicht</PlaceholderBanner>
-          <h3 className="mt-2 font-display text-lg font-semibold text-ink-900">Data Analyst Weiterbildung — Arbeitsmarkt-Radar Pilot</h3>
+          <h3 className="mt-2 font-display text-lg font-semibold text-ink-900">
+            Data Analyst Weiterbildung — Arbeitsmarkt-Radar Pilot
+          </h3>
         </div>
       </div>
+
       <dl className="divide-y divide-ink-100">
         {fields.map((f) => (
           <div key={f.label} className="grid sm:grid-cols-3 gap-1 sm:gap-4 py-3">
@@ -30,7 +35,10 @@ export default function CaseStudyTemplate() {
           </div>
         ))}
       </dl>
-      <p className="mt-5 text-xs text-ink-500 leading-relaxed">Zahlen und Aussagen werden erst nach einem echten Pilotlauf veroeffentlicht.</p>
+
+      <p className="mt-5 text-xs text-ink-500 leading-relaxed">
+        Zahlen und Aussagen werden erst nach einem echten Pilotlauf veroeffentlicht.
+      </p>
     </div>
   );
 }

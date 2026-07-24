@@ -5,13 +5,92 @@ export type LeadStatus = 'Candidate' | 'QA Needed' | 'Approved' | 'Rejected';
 export type ChangeStatus = 'open' | 'approved' | 'rejected';
 export type WorkflowStatus = 'completed' | 'running' | 'paused' | 'failed' | 'waiting';
 
-export interface School { id: number; name: string; status: SchoolStatus; contact: string; coursesCount: number; leadsCount: number; note: string; }
-export interface Course { id: number; schoolId: number; name: string; topic: string; status: CourseStatus; searchProfileId: number | null; leads: number; documents: number; score: number; }
-export interface SearchProfile { id: number; courseId: number; targetTitles: string[]; skills: string[]; locationRules: string; languageRules: string; exclusions: string[]; sourceQueries: string[]; coachNote: string; status: ProfileStatus; activeQueries: number; lastChanged: string; hasOpenChange: boolean; }
-export interface Lead { id: number; courseId: number; title: string; company: string; score: number; status: LeadStatus; risks: string; source: string; sourceUrl: string; whyFit: string; missingEvidence: string; coachNote: string; }
-export interface DocItem { id: number; name: string; schoolId: number; courseId: number | null; type: string; uploadedBy: string; date: string; access: 'private' | 'school' | 'public'; }
-export interface ChangeRequest { id: number; schoolId: number; courseId: number; field: string; suggestion: string; oldValue: string; newValue: string; submittedBy: string; status: ChangeStatus; date: string; }
-export interface WorkflowRun { id: number; workflow: string; mode: 'test' | 'live' | 'paused'; status: WorkflowStatus; items: number; createdLeads: number; lastRun: string; }
+export interface School {
+  id: number;
+  name: string;
+  status: SchoolStatus;
+  contact: string;
+  coursesCount: number;
+  leadsCount: number;
+  note: string;
+}
+
+export interface Course {
+  id: number;
+  schoolId: number;
+  name: string;
+  topic: string;
+  status: CourseStatus;
+  searchProfileId: number | null;
+  leads: number;
+  documents: number;
+  score: number;
+}
+
+export interface SearchProfile {
+  id: number;
+  courseId: number;
+  targetTitles: string[];
+  skills: string[];
+  locationRules: string;
+  languageRules: string;
+  exclusions: string[];
+  sourceQueries: string[];
+  coachNote: string;
+  status: ProfileStatus;
+  activeQueries: number;
+  lastChanged: string;
+  hasOpenChange: boolean;
+}
+
+export interface Lead {
+  id: number;
+  courseId: number;
+  title: string;
+  company: string;
+  score: number;
+  status: LeadStatus;
+  risks: string;
+  source: string;
+  sourceUrl: string;
+  whyFit: string;
+  missingEvidence: string;
+  coachNote: string;
+}
+
+export interface DocItem {
+  id: number;
+  name: string;
+  schoolId: number;
+  courseId: number | null;
+  type: string;
+  uploadedBy: string;
+  date: string;
+  access: 'private' | 'school' | 'public';
+}
+
+export interface ChangeRequest {
+  id: number;
+  schoolId: number;
+  courseId: number;
+  field: string;
+  suggestion: string;
+  oldValue: string;
+  newValue: string;
+  submittedBy: string;
+  status: ChangeStatus;
+  date: string;
+}
+
+export interface WorkflowRun {
+  id: number;
+  workflow: string;
+  mode: 'test' | 'live' | 'paused';
+  status: WorkflowStatus;
+  items: number;
+  createdLeads: number;
+  lastRun: string;
+}
 
 export const schools: School[] = [
   { id: 1, name: 'AZAV Academy', status: 'active', contact: 'Lena Brandt', coursesCount: 1, leadsCount: 52, note: 'Berlin, AZAV-zertifiziert, Fokus Data & BI.' },
@@ -30,10 +109,50 @@ export const courses: Course[] = [
 ];
 
 export const searchProfiles: SearchProfile[] = [
-  { id: 1, courseId: 1, targetTitles: ['Junior Data Analyst', 'BI Analyst', 'Reporting Analyst', 'Data Quality Analyst'], skills: ['SQL', 'Excel', 'Power BI', 'Python basics', 'dashboards', 'data cleaning'], locationRules: 'Remote Germany / EU, Berlin optional, no on-site requirement', languageRules: 'German B1/B2 OK, English OK, entry-level or junior only', exclusions: ['Senior', 'Lead', 'Manager', '5+ years', 'pure controlling', 'on-site only'], sourceQueries: ['site:arbeitsagentur.de Data Analyst Junior Remote', 'Junior BI Analyst Berlin Remote', 'Data Quality Analyst Einstieg'], coachNote: 'Coach focus: realistic entry titles and skill gaps.', status: 'active', activeQueries: 3, lastChanged: 'vor 2 Tagen', hasOpenChange: true },
-  { id: 2, courseId: 2, targetTitles: ['Workflow Automation Junior', 'Automation Assistant', 'n8n Operator'], skills: ['n8n', 'APIs', 'JSON', 'no-code tools', 'OpenAI APIs'], locationRules: 'Remote EU', languageRules: 'English B2+, German optional', exclusions: ['Senior', 'Lead', 'Manager', '5+ years'], sourceQueries: ['workflow automation junior remote', 'n8n operator remote', 'AI automation assistant entry'], coachNote: 'Automation-Einsteiger, no-code-nah.', status: 'active', activeQueries: 3, lastChanged: 'vor 4 Tagen', hasOpenChange: false },
-  { id: 3, courseId: 3, targetTitles: ['SAP Support Analyst Junior', 'SAP Junior', 'Data Analyst SAP'], skills: ['SAP basics', 'Excel', 'SQL basics', 'data entry'], locationRules: 'Berlin + Remote DACH', languageRules: 'German B2 required', exclusions: ['Senior', 'Lead', '5+ years', 'on-site only'], sourceQueries: ['sap support analyst junior', 'sap data analyst entry', 'SAP junior remote DACH'], coachNote: 'SAP-Einsteiger, Berlin/Remote.', status: 'active', activeQueries: 3, lastChanged: 'vor 1 Woche', hasOpenChange: false },
-  { id: 4, courseId: 4, targetTitles: ['BI Analyst Junior', 'Power BI Reporting Specialist', 'Reporting Analyst'], skills: ['Power BI', 'DAX', 'Tableau', 'SQL', 'Excel', 'ETL basics'], locationRules: 'Remote DACH + Berlin/Hamburg', languageRules: 'German B2 or English C1', exclusions: ['Senior', 'Lead', 'Manager', '5+ years'], sourceQueries: ['BI analyst junior remote', 'power BI reporting specialist', 'reporting analyst DACH entry'], coachNote: 'BI-Track, breites Reporting-Profil.', status: 'active', activeQueries: 3, lastChanged: 'vor 1 Tag', hasOpenChange: true },
+  {
+    id: 1, courseId: 1,
+    targetTitles: ['Junior Data Analyst', 'BI Analyst', 'Reporting Analyst', 'Data Quality Analyst'],
+    skills: ['SQL', 'Excel', 'Power BI', 'Python basics', 'dashboards', 'data cleaning'],
+    locationRules: 'Remote Germany / EU, Berlin optional, no on-site requirement',
+    languageRules: 'German B1/B2 OK, English OK, entry-level or junior only',
+    exclusions: ['Senior', 'Lead', 'Manager', '5+ years', 'pure controlling', 'on-site only'],
+    sourceQueries: ['site:arbeitsagentur.de Data Analyst Junior Remote', 'Junior BI Analyst Berlin Remote', 'Data Quality Analyst Einstieg'],
+    coachNote: 'Coach focus: realistic entry titles and skill gaps.',
+    status: 'active', activeQueries: 3, lastChanged: 'vor 2 Tagen', hasOpenChange: true,
+  },
+  {
+    id: 2, courseId: 2,
+    targetTitles: ['Workflow Automation Junior', 'Automation Assistant', 'n8n Operator'],
+    skills: ['n8n', 'APIs', 'JSON', 'no-code tools', 'OpenAI APIs'],
+    locationRules: 'Remote EU',
+    languageRules: 'English B2+, German optional',
+    exclusions: ['Senior', 'Lead', 'Manager', '5+ years'],
+    sourceQueries: ['workflow automation junior remote', 'n8n operator remote', 'AI automation assistant entry'],
+    coachNote: 'Automation-Einsteiger, no-code-nah.',
+    status: 'active', activeQueries: 3, lastChanged: 'vor 4 Tagen', hasOpenChange: false,
+  },
+  {
+    id: 3, courseId: 3,
+    targetTitles: ['SAP Support Analyst Junior', 'SAP Junior', 'Data Analyst SAP'],
+    skills: ['SAP basics', 'Excel', 'SQL basics', 'data entry'],
+    locationRules: 'Berlin + Remote DACH',
+    languageRules: 'German B2 required',
+    exclusions: ['Senior', 'Lead', '5+ years', 'on-site only'],
+    sourceQueries: ['sap support analyst junior', 'sap data analyst entry', 'SAP junior remote DACH'],
+    coachNote: 'SAP-Einsteiger, Berlin/Remote.',
+    status: 'active', activeQueries: 3, lastChanged: 'vor 1 Woche', hasOpenChange: false,
+  },
+  {
+    id: 4, courseId: 4,
+    targetTitles: ['BI Analyst Junior', 'Power BI Reporting Specialist', 'Reporting Analyst'],
+    skills: ['Power BI', 'DAX', 'Tableau', 'SQL', 'Excel', 'ETL basics'],
+    locationRules: 'Remote DACH + Berlin/Hamburg',
+    languageRules: 'German B2 or English C1',
+    exclusions: ['Senior', 'Lead', 'Manager', '5+ years'],
+    sourceQueries: ['BI analyst junior remote', 'power BI reporting specialist', 'reporting analyst DACH entry'],
+    coachNote: 'BI-Track, breites Reporting-Profil.',
+    status: 'active', activeQueries: 3, lastChanged: 'vor 1 Tag', hasOpenChange: true,
+  },
 ];
 
 export const leads: Lead[] = [
@@ -65,15 +184,42 @@ export const workflowRuns: WorkflowRun[] = [
   { id: 3, workflow: 'Weekly Report Generator', mode: 'paused', status: 'paused', items: 0, createdLeads: 0, lastRun: 'vor 3 Tagen' },
 ];
 
-export const documentTypes = ['Curriculum', 'AZAV proof', 'Syllabus', 'Skill matrix', 'Screenshot', 'Certificate', 'Other'];
+export const documentTypes = [
+  'Curriculum',
+  'AZAV proof',
+  'Syllabus',
+  'Skill matrix',
+  'Screenshot',
+  'Certificate',
+  'Other',
+];
+
 export const leadStatuses: LeadStatus[] = ['Candidate', 'QA Needed', 'Approved', 'Rejected'];
 
 export const testPayload = {
   workflow_name: 'Flow 4 Job APIs - Integration Test',
   run_mode: 'test',
-  items: [{ course_id: 1, title: 'Junior Data Analyst Remote', provider: 'Acme GmbH', status: 'Candidate', score: 77, source_url: 'https://example.com/job', why_fit: 'Matches SQL/Power BI profile', missing_evidence: 'QA check needed', risks: 'Check seniority and language requirement' }],
+  items: [
+    {
+      course_id: 1,
+      title: 'Junior Data Analyst Remote',
+      provider: 'Acme GmbH',
+      status: 'Candidate',
+      score: 77,
+      source_url: 'https://example.com/job',
+      why_fit: 'Matches SQL/Power BI profile',
+      missing_evidence: 'QA check needed',
+      risks: 'Check seniority and language requirement',
+    },
+  ],
 };
 
-export function schoolName(id: number): string { return schools.find((s) => s.id === id)?.name ?? '—'; }
-export function courseName(id: number): string { return courses.find((c) => c.id === id)?.name ?? '—'; }
-export function profileForCourse(courseId: number): SearchProfile | undefined { return searchProfiles.find((p) => p.courseId === courseId); }
+export function schoolName(id: number): string {
+  return schools.find((s) => s.id === id)?.name ?? '—';
+}
+export function courseName(id: number): string {
+  return courses.find((c) => c.id === id)?.name ?? '—';
+}
+export function profileForCourse(courseId: number): SearchProfile | undefined {
+  return searchProfiles.find((p) => p.courseId === courseId);
+}
