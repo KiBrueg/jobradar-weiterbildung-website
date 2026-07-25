@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Clock,
   TrendingUp,
@@ -25,8 +25,9 @@ import {
 } from 'lucide-react';
 import { Modal, Drawer } from '@/components/ui';
 import { useToast } from '@/components/Toast';
+import { getCeoDashboard, type ApiTimeRange, type BackendCeoDashboard } from '@/lib/api';
 
-type TimeRange = 'tag' | 'woche' | 'monat' | 'jahr';
+type TimeRange = ApiTimeRange;
 
 interface DashboardData {
   rawJobs: number;
@@ -164,6 +165,52 @@ const dashboardDataByRange: Record<TimeRange, DashboardData> = {
     sourceQuality: 88, qaBacklog: 17, automationSafety: 91, costControl: 93,
   },
 };
+
+function costFor(payload: BackendCeoDashboard, matcher: RegExp): number {
+  return (payload.cost_breakdown ?? [])
+    .filter((row) => matcher.test(`${row.tool_name} ${row.tool_type}`))
+    .reduce((sum, row) => sum + Number(row.cost || 0), 0);
+}
+
+function mapBackendDashboard(payload: BackendCeoDashboard): DashboardData {
+  const current = payload.current;
+  const toolCosts = Number(current.tool_costs || 0);
+  const serpApiCost = costFor(payload, /serpapi/i);
+  const llmCost = costFor(payload, /llm|openrouter/i);
+  const jinaCost = costFor(payload, /jina/i);
+  const n8nCost = costFor(payload, /n8n/i);
+  const hostingCost = costFor(payload, /hosting|vps/i);
+  const assignedCosts = serpApiCost + llmCost + jinaCost + n8nCost + hostingCost;
+
+  return {
+    rawJobs: current.raw_jobs,
+    duplicates: current.duplicates,
+    relevantLeads: current.relevant_leads,
+    topRecommendations: current.created_leads,
+    qaOpen: current.qa_open,
+    reportsPrepared: current.reports,
+    serpApiCost,
+    llmCost,
+    jinaCost,
+    n8nCost,
+    hostingCost,
+    otherApiCost: Math.max(0, toolCosts - assignedCosts),
+    manualJobsPerHour: current.manual_jobs_per_hour || 10,
+    qaMinutesPerRelevantLead: current.relevant_leads > 0 ? (current.automated_hours * 60) / current.relevant_leads : 2,
+    manualHoursTotal: current.manual_hours,
+    automatedHoursTotal: current.automated_hours,
+    hourlyRate: current.time_saved_hours > 0 ? Math.max(1, Math.round((current.net_benefit + toolCosts - current.report_value) / current.time_saved_hours)) : 45,
+    reportValue: current.report_value,
+    avgMatchScore: current.arbeitsmarkt_fit,
+    seniorityRisk: 22,
+    locationFit: 84,
+    languageFit: 71,
+    sourceQuality: current.source_quality,
+    qaBacklog: current.qa_open,
+    automationSafety: current.automation_safety,
+    costControl: current.cost_control,
+  };
+}
 
 function calculateDashboardKpis(data: DashboardData): DashboardKpis {
   const toolKosten =
@@ -324,8 +371,26 @@ export default function CeoCockpit() {
   const [kpiModal, setKpiModal] = useState<KpiCardData | null>(null);
   const [roiModal, setRoiModal] = useState(false);
   const [courseDrawer, setCourseDrawer] = useState<CoursePerfRow | null>(null);
+  const [apiDataByRange, setApiDataByRange] = useState<Partial<Record<TimeRange, DashboardData>>>({});
+  const [apiState, setApiState] = useState<'loading' | 'live' | 'demo'>('loading');
 
-  const data = useMemo(() => dashboardDataByRange[timeRange], [timeRange]);
+  useEffect(() => {
+    let cancelled = false;
+    setApiState((current) => (current === 'live' ? 'live' : 'loading'));
+    getCeoDashboard(timeRange)
+      .then((payload) => {
+        if (cancelled) return;
+        setApiDataByRange((prev) => ({ ...prev, [timeRange]: mapBackendDashboard(payload) }));
+        setApiState('live');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setApiState('demo');
+      });
+    return () => { cancelled = true; };
+  }, [timeRange]);
+
+  const data = useMemo(() => apiDataByRange[timeRange] ?? dashboardDataByRange[timeRange], [apiDataByRange, timeRange]);
   const kpis = useMemo(() => calculateDashboardKpis(data), [data]);
 
   const automatedReviewHours = data.relevantLeads * data.qaMinutesPerRelevantLead / 60;
@@ -399,7 +464,12 @@ export default function CeoCockpit() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="font-display text-2xl font-bold tracking-tight text-ink-900">CEO Cockpit</h2>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-display text-2xl font-bold tracking-tight text-ink-900">CEO Cockpit</h2>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${apiState === 'live' ? 'bg-accent-50 text-accent-700 ring-accent-200' : apiState === 'loading' ? 'bg-brand-50 text-brand-700 ring-brand-200' : 'bg-amber-50 text-amber-700 ring-amber-200'}`}>
+              {apiState === 'live' ? 'Live API-Daten' : apiState === 'loading' ? 'API wird geladen' : 'Demo-Fallback aktiv'}
+            </span>
+          </div>
           <p className="mt-1 text-sm text-ink-500">Zeitersparnis, ROI, Kosten, Workflow-Gesundheit und Kurs-Performance auf einen Blick.</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
