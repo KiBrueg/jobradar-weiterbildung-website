@@ -1,11 +1,14 @@
 import { ArrowLeft, Mail, MessageSquare, ShieldCheck } from 'lucide-react';
-import { goDatenschutz, goImpressum, goLanding } from '@/App';
+import { goLanding } from '@/App';
 import { useToast } from '@/components/Toast';
+import PublicHeader from '@/components/PublicHeader';
+import PublicFooter from '@/components/PublicFooter';
 
 export default function KontaktPage() {
   const { toast } = useToast();
   return (
     <div className="min-h-screen bg-ink-50 text-ink-900">
+      <PublicHeader />
       <main id="main-content" className="mx-auto max-w-4xl px-5 sm:px-8 py-12 md:py-16">
         <button onClick={goLanding} className="btn-ghost mb-8">
           <ArrowLeft className="h-4 w-4" />
@@ -41,6 +44,11 @@ export default function KontaktPage() {
             </div>
           </div>
 
+          <section className="rounded-2xl border border-ink-200 bg-white p-5 mb-8">
+            <h2 className="font-display text-lg font-semibold text-ink-900 mb-2">Datenschutzhinweis fuer Kontaktaufnahme</h2>
+            <p className="text-sm leading-relaxed text-ink-600">Dieses Formular ist eine Demo und sendet aktuell keine Daten. Bei Aktivierung einer echten Kontaktmoeglichkeit werden die uebermittelten Daten ausschliesslich zur Bearbeitung der Anfrage genutzt. Zweck, Speicherdauer und Empfaenger werden vorab dokumentiert.</p>
+          </section>
+
           <form
             className="rounded-2xl border border-ink-200 bg-white p-5 space-y-4"
             onSubmit={(e) => {
@@ -63,13 +71,9 @@ export default function KontaktPage() {
             <p className="text-xs text-ink-500">Hinweis: In dieser Demo wird nichts uebertragen. Vor Aktivierung eines echten Formulars werden Datenschutz, Zweck, Speicherdauer und Empfaenger dokumentiert.</p>
             <button type="submit" className="btn-primary">Demo-Anfrage testen</button>
           </form>
-
-          <div className="mt-10 flex flex-wrap gap-3 border-t border-ink-200 pt-6">
-            <button onClick={goImpressum} className="btn-secondary">Impressum</button>
-            <button onClick={goDatenschutz} className="btn-secondary">Datenschutz</button>
-          </div>
         </section>
       </main>
+      <PublicFooter />
     </div>
   );
 }

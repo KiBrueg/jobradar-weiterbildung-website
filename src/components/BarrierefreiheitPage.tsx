@@ -1,5 +1,7 @@
 import { ArrowLeft, Eye, Keyboard, MonitorSmartphone, Volume2 } from 'lucide-react';
-import { goDatenschutz, goKontakt, goLanding } from '@/App';
+import { goLanding } from '@/App';
+import PublicHeader from '@/components/PublicHeader';
+import PublicFooter from '@/components/PublicFooter';
 
 const checks = [
   { icon: Keyboard, title: 'Tastaturbedienbarkeit', text: 'Navigation, Buttons und wichtige Bereiche sollen ohne Maus erreichbar sein.' },
@@ -8,9 +10,18 @@ const checks = [
   { icon: Volume2, title: 'Reduzierte Bewegung', text: 'Animationen respektieren prefers-reduced-motion und sollen keine Kerninformation transportieren.' },
 ];
 
+const openItems = [
+  'Manuelle Tastaturpruefung aller interaktiven Elemente.',
+  'Screenreader-Test fuer Landing Page, Referenzen und Admin-Dashboard.',
+  'Kontrastpruefung aller Status-Badges und Diagramme.',
+  'Textalternativen fuer Charts, KPI-Karten und Reports finalisieren.',
+  'Formulare mit Labels, Fehlertexten und Datenschutz-Hinweisen pruefen.',
+];
+
 export default function BarrierefreiheitPage() {
   return (
     <div className="min-h-screen bg-ink-50 text-ink-900">
+      <PublicHeader />
       <main id="main-content" className="mx-auto max-w-4xl px-5 sm:px-8 py-12 md:py-16">
         <button onClick={goLanding} className="btn-ghost mb-8">
           <ArrowLeft className="h-4 w-4" />
@@ -28,6 +39,11 @@ export default function BarrierefreiheitPage() {
             Arbeitsstand: Orientierung an WCAG 2.1/2.2 AA und BITV 2.0. Diese Erklaerung wird vor Veroeffentlichung final geprueft und ergaenzt.
           </div>
 
+          <section className="rounded-2xl border border-ink-200 bg-white p-5 mb-6">
+            <h2 className="font-display text-xl font-semibold text-ink-900 mb-2">Stand der Vereinbarkeit mit den Anforderungen</h2>
+            <p className="text-sm leading-relaxed text-ink-600">Diese Website orientiert sich an den Richtlinien WCAG 2.1/2.2 AA sowie an der BITV 2.0. Eine vollstaendige Konformitaet ist nicht getestet und wird nicht behauptet. Bewusst wird auf Aussagen wie "vollstaendig barrierefrei" oder "100% WCAG compliant" verzichtet.</p>
+          </section>
+
           <div className="grid sm:grid-cols-2 gap-4">
             {checks.map((item) => (
               <section key={item.title} className="card-soft p-5">
@@ -41,27 +57,31 @@ export default function BarrierefreiheitPage() {
           </div>
 
           <section className="mt-8 rounded-2xl border border-ink-200 bg-white p-5">
-            <h2 className="font-display text-xl font-semibold text-ink-900">Noch offene Pruefungen</h2>
+            <h2 className="font-display text-xl font-semibold text-ink-900">Nicht barrierefreie Inhalte / offene Pruefungen</h2>
             <ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-ink-600">
-              <li>Manuelle Tastaturpruefung aller interaktiven Elemente.</li>
-              <li>Screenreader-Test fuer Landing Page, Referenzen und Admin-Dashboard.</li>
-              <li>Kontrastpruefung aller Status-Badges und Diagramme.</li>
-              <li>Textalternativen fuer Charts, KPI-Karten und Reports finalisieren.</li>
-              <li>Formulare mit Labels, Fehlertexten und Datenschutz-Hinweisen pruefen.</li>
+              {openItems.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
             </ul>
           </section>
 
           <section className="mt-6 rounded-2xl border border-accent-200 bg-accent-50/60 p-5">
-            <h2 className="font-display text-xl font-semibold text-ink-900">Feedback zur Barrierefreiheit</h2>
+            <h2 className="font-display text-xl font-semibold text-ink-900">Feedback und Kontakt</h2>
             <p className="mt-2 text-sm leading-relaxed text-ink-700">Kontaktmoeglichkeit wird vor Veroeffentlichung ergaenzt. Hinweise zur Bedienbarkeit sollen spaeter ueber die Kontaktseite gemeldet werden koennen.</p>
           </section>
 
-          <div className="mt-10 flex flex-wrap gap-3 border-t border-ink-200 pt-6">
-            <button onClick={goDatenschutz} className="btn-secondary">Datenschutz</button>
-            <button onClick={goKontakt} className="btn-secondary">Kontakt</button>
-          </div>
+          <section className="mt-6 rounded-2xl border border-ink-200 bg-white p-5">
+            <h2 className="font-display text-xl font-semibold text-ink-900">Durchsetzungsverfahren / zustaendige Stelle</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-600">Angaben zur zustaendigen Durchsetzungsstelle folgen vor Veroeffentlichung.</p>
+          </section>
+
+          <section className="mt-6 rounded-2xl border border-ink-200 bg-white p-5">
+            <h2 className="font-display text-xl font-semibold text-ink-900">Erstellungsdatum / letzte Aktualisierung</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-600">Diese Erklaerung ist ein Arbeitsstand und wird vor Veroeffentlichung final geprueft. Datum der finalen Version wird ergaenzt.</p>
+          </section>
         </section>
       </main>
+      <PublicFooter />
     </div>
   );
 }
