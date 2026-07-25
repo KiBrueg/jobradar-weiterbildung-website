@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Modal, Drawer } from '@/components/ui';
 import { useToast } from '@/components/Toast';
-import { getCeoDashboard, type ApiTimeRange, type BackendCeoDashboard } from '@/lib/api';
+import { getCeoDashboard, ceoReportDownloadUrl, type ApiTimeRange, type BackendCeoDashboard } from '@/lib/api';
 
 type TimeRange = ApiTimeRange;
 
@@ -820,10 +820,10 @@ export default function CeoCockpit() {
             <h3 className="font-display text-base font-semibold text-ink-900 mb-1 flex items-center gap-2"><FileText className="h-4 w-4 text-brand-600" />CEO Report — {rangeLabel(timeRange)}</h3>
             <p className="text-xs text-ink-500 mb-4">Statistik für Management, Kostenkontrolle und Arbeitsmarktnachweis.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-              <button onClick={() => toast(`Demo: ${rangeLabel(timeRange)}-Report wurde vorbereitet.`, 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> {rangeLabel(timeRange)}-Report</button>
-              <button onClick={() => toast('Demo: Jahresreport wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Jahresreport</button>
-              <button onClick={() => toast('Demo: ROI-Report wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> ROI-Report</button>
-              <button onClick={() => toast('Demo: Kostenbericht wurde vorbereitet.', 'success')} className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Kostenbericht</button>
+              <a href={ceoReportDownloadUrl(timeRange)} download className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> {rangeLabel(timeRange)}-Report JSON</a>
+              <a href={ceoReportDownloadUrl('jahr')} download className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Jahresreport JSON</a>
+              <a href={ceoReportDownloadUrl('monat')} download className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> ROI-Daten JSON</a>
+              <a href={ceoReportDownloadUrl('monat')} download className="btn-primary text-xs justify-center"><Download className="h-3.5 w-3.5" /> Kostenbericht JSON</a>
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="rounded-xl bg-ink-50/60 border border-ink-100 p-4"><span className="text-xs font-semibold text-ink-600 mb-2 block">Report enthält:</span><ul className="space-y-1 text-xs text-ink-500"><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> KPI Summary</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> ROI</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> Zeitersparnis</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> Kostenbreakdown</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> Kurs-Performance</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> Quellengesundheit</li><li className="flex items-center gap-1.5"><ChevronRight className="h-3 w-3 text-brand-500" /> Management-Aktionen</li></ul></div>
