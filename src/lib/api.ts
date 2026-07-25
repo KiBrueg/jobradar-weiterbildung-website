@@ -24,6 +24,11 @@ export interface BackendCeoCurrent {
   qa_health: number;
 }
 
+export interface BackendSeriesPoint extends BackendCeoCurrent {
+  label: string;
+  month?: string;
+}
+
 export interface BackendCostBreakdownRow {
   tool_name: string;
   tool_type: string;
@@ -33,13 +38,64 @@ export interface BackendCostBreakdownRow {
   cost: number;
 }
 
+export interface BackendSourceHealthRow {
+  source_name: string;
+  source_type: string;
+  runs: number;
+  raw_items: number;
+  relevant_items: number;
+  failed_items: number;
+  success_rate: number;
+  quality_score: number;
+  risk_level: string;
+  last_run: string;
+}
+
+export interface BackendCoursePerformanceRow {
+  course_id: number;
+  course: string;
+  school: string;
+  base_fit: number;
+  leads: number;
+  avg_score: number;
+  qa_open: number;
+  arbeitsmarkt_fit: number;
+  risk: string;
+  recommendation: string;
+}
+
+export interface BackendAiRoleBenchmarkRow {
+  id: string;
+  role: string;
+  de: string;
+  titles: string[];
+  exclude: string[];
+  courses: string[];
+  fit: number;
+  leads: number;
+  entry_level: number;
+  risk: string;
+  recommendation: string;
+}
+
+export interface BackendActionRow {
+  title: string;
+  priority: string;
+  impact: string;
+}
+
 export interface BackendCeoDashboard {
   ok: boolean;
   range: ApiTimeRange;
   period_label: string;
   current: BackendCeoCurrent;
   previous?: Partial<BackendCeoCurrent>;
+  series?: BackendSeriesPoint[];
   cost_breakdown?: BackendCostBreakdownRow[];
+  source_health?: BackendSourceHealthRow[];
+  course_performance?: BackendCoursePerformanceRow[];
+  ai_role_benchmark?: BackendAiRoleBenchmarkRow[];
+  actions?: BackendActionRow[];
 }
 
 export async function getCeoDashboard(range: ApiTimeRange): Promise<BackendCeoDashboard> {

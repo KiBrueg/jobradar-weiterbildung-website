@@ -123,6 +123,18 @@ interface CoursePerfRow {
   empfehlung: string;
 }
 
+interface AiRoleRow {
+  role: string;
+  de: string;
+  titles: string[];
+  courses: string[];
+  fit: number;
+  leads: number;
+  entryLevel: number;
+  risk: string;
+  recommendation: string;
+}
+
 const dashboardDataByRange: Record<TimeRange, DashboardData> = {
   tag: {
     rawJobs: 12, duplicates: 3, relevantLeads: 3, topRecommendations: 1,
@@ -210,6 +222,105 @@ function mapBackendDashboard(payload: BackendCeoDashboard): DashboardData {
     automationSafety: current.automation_safety,
     costControl: current.cost_control,
   };
+}
+
+function costCategory(toolName: string, toolType: string): string {
+  const text = `${toolName} ${toolType}`.toLowerCase();
+  if (text.includes('serp') || text.includes('api')) return 'paid';
+  if (text.includes('llm') || text.includes('openrouter')) return 'llm';
+  if (text.includes('n8n')) return 'n8n';
+  if (text.includes('hosting') || text.includes('vps')) return 'hosting';
+  if (text.includes('sqlite') || text.includes('tunnel') || text.includes('infra')) return 'infra';
+  if (text.includes('free') || text.includes('scraper')) return 'free';
+  return 'paid';
+}
+
+function relTime(iso: string): string {
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return '—';
+  const hours = Math.max(0, Math.round((Date.now() - ts) / 36e5));
+  if (hours < 1) return 'gerade eben';
+  if (hours < 24) return `vor ${hours} h`;
+  return `vor ${Math.round(hours / 24)} T`;
+}
+
+function mapCostRows(payload?: BackendCeoDashboard): CostRow[] {
+  const rows = payload?.cost_breakdown ?? [];
+  if (!rows.length) return costRows;
+  return rows.map((r) => {
+    const cost = Number(r.cost || 0);
+    return {
+      tool: r.tool_name,
+      typ: r.tool_type,
+      runsHeute: r.runs,
+      items: Math.round(Number(r.units || 0)),
+      kostenHeute: cost,
+      kostenMonat: cost,
+      kostenJahr: Math.round(cost * 12),
+      status: cost > 0 ? 'OK' : 'OK',
+      optimierung: cost > 1 ? 'Kosten beobachten' : 'Weiter nutzen',
+      category: costCategory(r.tool_name, r.tool_type),
+    };
+  });
+}
+
+function mapSourceRows(payload?: BackendCeoDashboard): SourceHealthRow[] {
+  const rows = payload?.source_health ?? [];
+  if (!rows.length) return sourceHealthRows;
+  return rows.map((s) => ({
+    name: s.source_name,
+    status: s.failed_items > 0 || s.risk_level.toLowerCase() === 'high' ? 'Watch' : 'OK',
+    erfolgsrate: Math.round(Number(s.success_rate || 0)),
+    runs: s.runs,
+    rawJobs: s.raw_items,
+    relevantLeads: s.relevant_items,
+    letzterLauf: relTime(s.last_run),
+    trefferqualitaet: Number(s.quality_score || 0) >= 85 ? 'High' : Number(s.quality_score || 0) >= 70 ? 'Medium' : 'Low',
+    kosten: /llm|api|serp/i.test(`${s.source_name} ${s.source_type}`) ? 'Paid' : 'Free/Low',
+    risiko: s.risk_level,
+  }));
+}
+
+function mapCourseRows(payload?: BackendCeoDashboard): CoursePerfRow[] {
+  const rows = payload?.course_performance ?? [];
+  if (!rows.length) return coursePerfRows;
+  return rows.map((c) => ({
+    kurs: c.course,
+    schule: c.school,
+    fit: Math.round(c.arbeitsmarkt_fit || c.avg_score || c.base_fit || 0),
+    leadsMonat: c.leads,
+    leadsJahr: c.leads * 12,
+    qaOffen: c.qa_open,
+    risiko: c.risk,
+    empfehlung: c.recommendation,
+  }));
+}
+
+function mapAiRoleRows(payload?: BackendCeoDashboard): AiRoleRow[] {
+  return (payload?.ai_role_benchmark ?? []).map((r) => ({
+    role: r.role,
+    de: r.de,
+    titles: r.titles,
+    courses: r.courses,
+    fit: r.fit,
+    leads: r.leads,
+    entryLevel: r.entry_level,
+    risk: r.risk,
+    recommendation: r.recommendation,
+  }));
+}
+
+function mapActions(payload?: BackendCeoDashboard): typeof ceoActions {
+  return payload?.actions?.length ? payload.actions : ceoActions;
+}
+
+function mapSeries(payload?: BackendCeoDashboard): { label: string; leads: number }[] {
+  const rows = payload?.series ?? [];
+  if (!rows.length) return [
+    { label: 'Jan', leads: 28 }, { label: 'Feb', leads: 31 }, { label: 'Mär', leads: 35 },
+    { label: 'Apr', leads: 33 }, { label: 'Mai', leads: 39 }, { label: 'Jun', leads: 37 }, { label: 'Jul', leads: 39 },
+  ];
+  return rows.slice(-7).map((r) => ({ label: r.label, leads: r.relevant_leads }));
 }
 
 function calculateDashboardKpis(data: DashboardData): DashboardKpis {
@@ -372,6 +483,7 @@ export default function CeoCockpit() {
   const [roiModal, setRoiModal] = useState(false);
   const [courseDrawer, setCourseDrawer] = useState<CoursePerfRow | null>(null);
   const [apiDataByRange, setApiDataByRange] = useState<Partial<Record<TimeRange, DashboardData>>>({});
+  const [apiPayloadByRange, setApiPayloadByRange] = useState<Partial<Record<TimeRange, BackendCeoDashboard>>>({});
   const [apiState, setApiState] = useState<'loading' | 'live' | 'demo'>('loading');
 
   useEffect(() => {
@@ -381,6 +493,7 @@ export default function CeoCockpit() {
       .then((payload) => {
         if (cancelled) return;
         setApiDataByRange((prev) => ({ ...prev, [timeRange]: mapBackendDashboard(payload) }));
+        setApiPayloadByRange((prev) => ({ ...prev, [timeRange]: payload }));
         setApiState('live');
       })
       .catch(() => {
@@ -391,16 +504,23 @@ export default function CeoCockpit() {
   }, [timeRange]);
 
   const data = useMemo(() => apiDataByRange[timeRange] ?? dashboardDataByRange[timeRange], [apiDataByRange, timeRange]);
+  const apiPayload = apiPayloadByRange[timeRange];
   const kpis = useMemo(() => calculateDashboardKpis(data), [data]);
+  const liveCostRows = useMemo(() => mapCostRows(apiPayload), [apiPayload]);
+  const liveSourceRows = useMemo(() => mapSourceRows(apiPayload), [apiPayload]);
+  const liveCourseRows = useMemo(() => mapCourseRows(apiPayload), [apiPayload]);
+  const liveAiRoleRows = useMemo(() => mapAiRoleRows(apiPayload), [apiPayload]);
+  const liveActions = useMemo(() => mapActions(apiPayload), [apiPayload]);
+  const liveSeries = useMemo(() => mapSeries(apiPayload), [apiPayload]);
 
   const automatedReviewHours = data.relevantLeads * data.qaMinutesPerRelevantLead / 60;
   const jobRadarItemsPerReviewHour = automatedReviewHours > 0 ? data.rawJobs / automatedReviewHours : 0;
   const manualHours = data.manualJobsPerHour > 0 ? data.rawJobs / data.manualJobsPerHour : 0;
 
   const filteredCostRows = useMemo(() => {
-    if (costFilter === 'alle') return costRows;
-    return costRows.filter((r) => r.category === costFilter);
-  }, [costFilter]);
+    if (costFilter === 'alle') return liveCostRows;
+    return liveCostRows.filter((r) => r.category === costFilter);
+  }, [costFilter, liveCostRows]);
 
   const statusBadgeColor = (color: string): string => {
     const map: Record<string, string> = {
@@ -534,10 +654,10 @@ export default function CeoCockpit() {
                 </div>
               )}
               <div className="mt-5 pt-4 border-t border-ink-100">
-                <div className="flex items-center justify-between mb-3"><span className="text-xs font-semibold text-ink-600">Leads pro Monat (vergangene 7 Monate)</span><span className="text-xs text-ink-400">Demo</span></div>
+                <div className="flex items-center justify-between mb-3"><span className="text-xs font-semibold text-ink-600">Leads pro Monat (Backend-Serie)</span><span className="text-xs text-accent-600">Live</span></div>
                 <div className="flex items-end gap-2 h-20" role="img" aria-label="Balkendiagramm: Leads pro Monat">
-                  {[28, 31, 35, 33, 39, 37, 39].map((v, i) => (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1"><div className="w-full rounded-t-md bg-gradient-to-t from-brand-200 to-brand-500 transition-all hover:from-brand-300 hover:to-brand-600" style={{ height: `${(v / 40) * 100}%` }} /><span className="text-[9px] text-ink-400">{['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul'][i]}</span></div>
+                  {liveSeries.map((point) => (
+                    <div key={point.label} className="flex-1 flex flex-col items-center gap-1"><div className="w-full rounded-t-md bg-gradient-to-t from-brand-200 to-brand-500 transition-all hover:from-brand-300 hover:to-brand-600" style={{ height: `${(point.leads / Math.max(...liveSeries.map((p) => p.leads), 1)) * 100}%` }} /><span className="text-[9px] text-ink-400">{point.label}</span></div>
                   ))}
                 </div>
               </div>
@@ -623,7 +743,7 @@ export default function CeoCockpit() {
               <table className="table-base">
                 <thead><tr><th>Kurs</th><th>Schule</th><th>Arbeitsmarkt-Fit</th><th>Leads Monat</th><th>Leads Jahr</th><th>QA offen</th><th>Risiko</th><th>Empfehlung</th></tr></thead>
                 <tbody>
-                  {coursePerfRows.map((c, i) => (
+                  {liveCourseRows.map((c, i) => (
                     <tr key={i} className="cursor-pointer hover:bg-ink-50/50" onClick={() => setCourseDrawer(c)}>
                       <td className="font-medium text-ink-900">{c.kurs}</td><td className="text-xs text-ink-500">{c.schule}</td>
                       <td><div className="flex items-center gap-2"><div className="w-20 h-2 rounded-full bg-ink-100 overflow-hidden"><div className={`h-full rounded-full ${c.fit >= 80 ? 'bg-accent-500' : c.fit >= 65 ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${c.fit}%` }} /></div><span className="text-xs font-semibold tabular-nums">{c.fit}%</span></div></td>
@@ -636,12 +756,47 @@ export default function CeoCockpit() {
             </div>
           </div>
 
+          {/* AI Role Benchmark */}
+          {liveAiRoleRows.length > 0 && (
+            <div className="card p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="font-display text-base font-semibold text-ink-900 flex items-center gap-2"><Rocket className="h-4 w-4 text-cyanx-600" />Arbeitsmarkt-Fit nach AI-Rollen — 2026 Benchmark</h3>
+                  <p className="mt-1 text-xs text-ink-500">Live aus dem FastAPI Backend: Zielrollen, Entry-Level-Anteil, passende Kurse und Empfehlungen.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => toast('Demo: AI-Rollen-Katalog auf Suchprofile vorgemerkt.', 'success')} className="btn-secondary text-xs">AI-Rollen-Katalog anwenden</button>
+                  <button onClick={() => toast(liveAiRoleRows.flatMap((r) => r.titles).slice(0, 8).join(' · '), 'info')} className="btn-ghost text-xs">Target Titles anzeigen</button>
+                </div>
+              </div>
+              <div className="table-wrap" role="region" aria-label="AI-Rollen Benchmark Tabelle" tabIndex={0}>
+                <table className="table-base">
+                  <thead><tr><th>AI-Rolle</th><th>Deutsch</th><th>Fit</th><th>Leads</th><th>Entry-Level</th><th>Kurse</th><th>Risiko</th><th>Empfehlung</th></tr></thead>
+                  <tbody>
+                    {liveAiRoleRows.map((r) => (
+                      <tr key={r.role}>
+                        <td className="font-medium text-ink-900"><div>{r.role}</div><div className="mt-1 text-[10px] text-ink-400 leading-snug">{r.titles.slice(0, 3).join(' · ')}</div></td>
+                        <td className="text-xs text-ink-600">{r.de}</td>
+                        <td><div className="flex items-center gap-2"><div className="w-20 h-2 rounded-full bg-ink-100 overflow-hidden"><div className={`h-full rounded-full ${r.fit >= 80 ? 'bg-accent-500' : r.fit >= 65 ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${r.fit}%` }} /></div><span className="text-xs font-semibold tabular-nums">{r.fit}%</span></div></td>
+                        <td className="tabular-nums text-sm">{r.leads}</td>
+                        <td className="tabular-nums text-sm">{r.entryLevel}%</td>
+                        <td className="text-xs text-ink-500">{r.courses.slice(0, 2).join(', ')}</td>
+                        <td><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${riskPill(r.risk)}`}>{r.risk}</span></td>
+                        <td className="text-xs text-ink-600">{r.recommendation}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Actions + Mood */}
           <div className="grid lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 card p-5">
               <h3 className="font-display text-base font-semibold text-ink-900 mb-4 flex items-center gap-2"><Lightbulb className="h-4 w-4 text-amber-500" />Empfohlene Management-Aktionen</h3>
               <div className="space-y-3">
-                {ceoActions.map((a, i) => (
+                {liveActions.map((a, i) => (
                   <div key={i} className="flex items-center justify-between gap-3 rounded-xl border border-ink-100 p-3 hover:border-brand-200 hover:bg-brand-50/30 transition-all">
                     <div className="flex items-center gap-3 min-w-0"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink-100 text-ink-600 text-xs font-bold shrink-0">{i + 1}</span><div className="min-w-0"><p className="text-sm font-medium text-ink-800 truncate">{a.title}</p><p className="text-xs text-ink-400">{a.impact}</p></div></div>
                     <div className="flex items-center gap-2 shrink-0"><span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${priorityBadge(a.priority)}`}>{a.priority}</span><button onClick={() => toast('Demo: Aufgabe markiert.', 'info')} className="btn-ghost px-2 py-1 text-xs">Als Aufgabe</button></div>
@@ -691,7 +846,7 @@ export default function CeoCockpit() {
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              {[{ label: `Kosten ${rangeLabel(timeRange)}`, value: euroFmt(kpis.toolKosten), icon: Euro }, { label: 'Kosten Monat', value: euroFmt(dashboardDataByRange.monat.serpApiCost + dashboardDataByRange.monat.llmCost + dashboardDataByRange.monat.jinaCost + dashboardDataByRange.monat.n8nCost + dashboardDataByRange.monat.hostingCost), icon: Calendar }, { label: 'Kosten Jahr', value: euroFmt(kpis.toolKosten * 12), icon: TrendingUp }, { label: 'Budgetstatus', value: 'Im Rahmen', icon: CheckCircle2 }].map((s, i) => { const Icon = s.icon; return (
+              {[{ label: `Kosten ${rangeLabel(timeRange)}`, value: euroFmt(kpis.toolKosten), icon: Euro }, { label: 'Backend-Kosten', value: euroFmt(liveCostRows.reduce((sum, r) => sum + r.kostenMonat, 0)), icon: Calendar }, { label: 'Kosten Jahr', value: euroFmt(liveCostRows.reduce((sum, r) => sum + r.kostenJahr, 0)), icon: TrendingUp }, { label: 'Budgetstatus', value: 'Im Rahmen', icon: CheckCircle2 }].map((s, i) => { const Icon = s.icon; return (
                 <div key={i} className="rounded-xl bg-ink-50/60 border border-ink-100 p-3 flex flex-col gap-1"><Icon className="h-3.5 w-3.5 text-ink-400" /><span className="font-display text-base font-bold text-ink-900">{s.value}</span><span className="text-[10px] text-ink-500">{s.label}</span></div>
               );})}
             </div>
@@ -720,7 +875,7 @@ export default function CeoCockpit() {
               <table className="table-base">
                 <thead><tr><th>Quelle</th><th>Status</th><th>Erfolgsrate</th><th>Runs</th><th>Rohstellen</th><th>Relevante Leads</th><th>Letzter Lauf</th><th>Trefferqualität</th><th>Kosten</th><th>Risiko</th></tr></thead>
                 <tbody>
-                  {sourceHealthRows.map((s, i) => (
+                  {liveSourceRows.map((s, i) => (
                     <tr key={i}><td className="font-medium text-ink-900">{s.name}</td><td><span className="flex items-center gap-1.5 text-xs"><span className={`h-2 w-2 rounded-full ${statusDotColor(s.status)}`} />{s.status}</span></td><td><div className="flex items-center gap-2"><div className="w-16 h-1.5 rounded-full bg-ink-100 overflow-hidden"><div className={`h-full rounded-full ${s.erfolgsrate >= 85 ? 'bg-accent-500' : s.erfolgsrate >= 70 ? 'bg-amber-400' : 'bg-rose-500'}`} style={{ width: `${s.erfolgsrate}%` }} /></div><span className="text-xs tabular-nums">{s.erfolgsrate}%</span></div></td><td className="tabular-nums text-sm">{s.runs || '—'}</td><td className="tabular-nums text-sm">{s.rawJobs || '—'}</td><td className="tabular-nums text-sm">{s.relevantLeads || '—'}</td><td className="text-xs text-ink-500">{s.letzterLauf}</td><td className="text-xs text-ink-600">{s.trefferqualitaet}</td><td className="text-xs text-ink-600">{s.kosten}</td><td className="text-xs text-ink-600">{s.risiko}</td></tr>
                   ))}
                 </tbody>
