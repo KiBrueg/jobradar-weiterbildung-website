@@ -11,8 +11,9 @@ import {
   ClipboardCheck,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goBarrierefreiheit, goDatenschutz, goImpressum, goKontakt, goLanding, goReferenzen } from '@/App';
+import { goAdmin, goLanding, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
+import PublicFooter from '@/components/PublicFooter';
 import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
 import FeedbackStatusCard from '@/components/references/FeedbackStatusCard';
 import FutureReviewSources from '@/components/references/FutureReviewSources';
@@ -108,12 +109,10 @@ export default function ReferencesPage() {
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 grid-bg opacity-60" />
         <div
-          className="absolute inset-0 opacity-[0.06]"
+          className="absolute inset-0 opacity-[0.04]"
           style={{
-            backgroundImage:
-              "url('https://images.pexels.com/photos/3184339/pexels-photo-3184339.jpeg?auto=compress&cs=tinysrgb&w=1600')",
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
+            background:
+              'linear-gradient(135deg, var(--color-brand-100) 0%, transparent 40%, var(--color-accent-100) 100%)',
             transform: 'perspective(1200px) rotateX(2deg)',
           }}
         />
@@ -266,34 +265,7 @@ export default function ReferencesPage() {
         </div>
       </PageSection>
 
-      {/* Footer — minimal, calm, off-white */}
-      <footer className="bg-ink-50 border-t border-ink-200">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8 py-10">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div>
-              <button onClick={goLanding} className="flex items-center gap-2.5">
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-ink-900 text-white">
-                  <Radar className="h-4.5 w-4.5" />
-                </span>
-                <span className="font-display text-[15px] font-semibold text-ink-900">JobRadar Weiterbildung</span>
-              </button>
-              <p className="mt-3 text-sm text-ink-500">KI-gestuetzt, menschlich geprueft.</p>
-            </div>
-            <nav className="flex flex-wrap gap-6 text-sm" aria-label="Rechtliche Navigation">
-              <button onClick={goLanding} className="text-ink-500 hover:text-ink-900 transition-colors">Uebersicht</button>
-              <button onClick={goReferenzen} className="text-ink-500 hover:text-ink-900 transition-colors">Referenzen</button>
-              <button onClick={goAdmin} className="text-ink-500 hover:text-ink-900 transition-colors">Admin Demo</button>
-              <button onClick={goImpressum} className="text-ink-500 hover:text-ink-900 transition-colors">Impressum</button>
-              <button onClick={goDatenschutz} className="text-ink-500 hover:text-ink-900 transition-colors">Datenschutz</button>
-              <button onClick={goBarrierefreiheit} className="text-ink-500 hover:text-ink-900 transition-colors">Barrierefreiheit</button>
-              <button onClick={goKontakt} className="text-ink-500 hover:text-ink-900 transition-colors">Kontakt</button>
-            </nav>
-          </div>
-          <div className="mt-8 pt-6 border-t border-ink-200 text-xs text-ink-400">
-            (c) {new Date().getFullYear()} JobRadar Weiterbildung. Local MVP — keine externen API-Aufrufe.
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 }
