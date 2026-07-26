@@ -93,7 +93,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-40 glass border-b border-ink-200/60" role="banner">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="flex h-16 items-center justify-between">
-            <a href="/" className="flex items-center gap-2.5 group">
+            <a href="/" className="flex items-center gap-2.5 group" aria-label="JobRadar Weiterbildung Startseite">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink-900 text-white transition-transform group-hover:scale-105">
                 <Radar className="h-5 w-5" />
               </span>
@@ -114,7 +114,7 @@ export default function LandingPage() {
               <button
                 onClick={() => setMobileNav((v) => !v)}
                 className="md:hidden btn-ghost px-2"
-                aria-label="Menü"
+                aria-label={mobileNav ? 'Menü schließen' : 'Menü öffnen'}
                 aria-expanded={mobileNav}
                 aria-controls="mobile-nav"
               >
@@ -385,6 +385,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
       </main>
 
       <PublicFooter />
