@@ -247,7 +247,7 @@ def register_ceo_routes(app, db_path: Path, report_dir: Path, init_db_func):
             {"title":"Python Backend Suchprofil prüfen — Fit unter 60%","priority":"Hoch","impact":"Risiko senken"},
             {"title":"SerpAPI Queries bündeln","priority":"Mittel","impact":"API-Kosten stabil halten"},
             {"title":"QA-Rückstau reduzieren","priority":"Mittel","impact":"Reportqualität erhöhen"},
-            {"title":"Stabile Production-URL statt localtunnel planen","priority":"Niedrig","impact":"Betriebssicherheit erhöhen"},
+            {"title":"OpenRouter-Guthaben prüfen & auffüllen (Schwelle: $5)","priority":"Mittel","impact":"Workflow-Ausfälle verhindern"},
         ]
         ai_roles = [
             {"id":"ai_integration","role":"AI Integration Engineer","de":"KI-Integrationsspezialist","titles":["AI Integration Engineer","AI Automation Engineer","Workflow Automation Engineer","API Integration Engineer","n8n Automation Specialist","Low-Code Automation Specialist"],"exclude":["Senior","Lead","Principal","Head of","10+ years"],"courses":["AI Automation / n8n Course","Python Backend Bootcamp","Business Intelligence Track"],"fit":88,"leads":18,"entry_level":72,"risk":"Low","recommendation":"Als Standard-Zielrolle für Automatisierungs-Kurse nutzen"},
