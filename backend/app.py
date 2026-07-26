@@ -9,16 +9,56 @@ import os
 import secrets
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import psycopg2
+import psycopg2.extras
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
+
+# ── Jobradar Postgres connection (env: JOBRADAR_PG_DSN or PG_HOST/USER/PASS/DB)
+_PG_DSN: str | None = os.getenv("JOBRADAR_PG_DSN") or (
+    "postgresql://{u}:{p}@{h}:{port}/{d}".format(
+        u=os.getenv("POSTGRES_USER", "hub"),
+        p=os.getenv("POSTGRES_PASSWORD", ""),
+        h=os.getenv("POSTGRES_HOST", "postgres"),
+        port=os.getenv("POSTGRES_PORT", "5432"),
+        d=os.getenv("POSTGRES_DB_JOBRADAR", "jobradar"),
+    )
+    if os.getenv("POSTGRES_PASSWORD")
+    else None
+)
+
+@contextmanager
+def pg():
+    if not _PG_DSN:
+        raise HTTPException(503, "Postgres not configured (set JOBRADAR_PG_DSN or POSTGRES_PASSWORD)")
+    conn = psycopg2.connect(_PG_DSN, cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+def pg_rows(sql: str, params=None) -> list[dict]:
+    with pg() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        return [dict(r) for r in cur.fetchall()]
+
+def pg_exec(sql: str, params=None) -> None:
+    with pg() as conn:
+        conn.cursor().execute(sql, params or ())
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "jobradar.sqlite3"
@@ -927,6 +967,147 @@ def download_db() -> FileResponse:
 
 from ceo_metrics import register_ceo_routes
 register_ceo_routes(app, DB_PATH, REPORT_DIR, init_db)
+
+
+# ── QA Review Interface ───────────────────────────────────────────────────────
+
+_QA_CSS = """
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f8fafc;color:#1e293b}
+.header{background:#0f172a;color:#fff;padding:16px 24px;display:flex;align-items:center;gap:12px}
+.header h1{margin:0;font-size:18px;font-weight:600}
+.badge{background:#334155;color:#94a3b8;padding:3px 10px;border-radius:99px;font-size:12px}
+.container{max-width:1200px;margin:24px auto;padding:0 20px}
+.stats{display:flex;gap:12px;margin-bottom:20px}
+.stat{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 20px;flex:1;text-align:center}
+.stat-n{font-size:28px;font-weight:700;color:#0f172a}
+.stat-l{font-size:12px;color:#64748b;margin-top:2px}
+table{width:100%;background:#fff;border-radius:12px;border:1px solid #e2e8f0;border-collapse:collapse;overflow:hidden}
+th{background:#f1f5f9;padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:#475569;border-bottom:1px solid #e2e8f0}
+td{padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.score{display:inline-block;padding:2px 8px;border-radius:6px;font-weight:700;font-size:12px}
+.s-high{background:#dcfce7;color:#166534}
+.s-mid{background:#fef9c3;color:#854d0e}
+.s-low{background:#fee2e2;color:#991b1b}
+.btn{display:inline-block;padding:5px 12px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:600}
+.btn-approve{background:#22c55e;color:#fff}
+.btn-reject{background:#ef4444;color:#fff}
+.btn-approve:hover{background:#16a34a}
+.btn-reject:hover{background:#dc2626}
+form{display:inline}
+.reason{font-size:11px;color:#64748b;margin-top:4px}
+select{font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:6px;margin-left:4px}
+.empty{text-align:center;padding:48px;color:#94a3b8}
+a.back{color:#94a3b8;text-decoration:none;font-size:13px}
+a.back:hover{color:#fff}
+</style>
+"""
+
+_REJECT_REASONS = [
+    "too_senior", "too_junior", "wrong_language", "location_mismatch",
+    "wrong_domain", "expired", "duplicate", "low_quality_listing",
+    "requires_degree", "requires_experience", "salary_mismatch", "other",
+]
+
+@app.get("/qa", response_class=HTMLResponse, include_in_schema=False)
+def qa_index():
+    try:
+        pending = pg_rows(
+            "SELECT id, school, course, job_title, company, location, work_mode, "
+            "fit_score, fit_reason, matched_skills, source_url, created_at "
+            "FROM v_qa_needs_review LIMIT 100"
+        )
+        approved = pg_rows("SELECT COUNT(*) AS n FROM job_matches WHERE status='approved'")
+        rejected = pg_rows("SELECT COUNT(*) AS n FROM job_matches WHERE status='rejected'")
+        n_app = approved[0]["n"] if approved else 0
+        n_rej = rejected[0]["n"] if rejected else 0
+    except Exception as exc:
+        return HTMLResponse(f"<pre>Postgres not available: {exc}</pre>", status_code=503)
+
+    def score_cls(s):
+        if s >= 75: return "s-high"
+        if s >= 55: return "s-mid"
+        return "s-low"
+
+    rows_html = ""
+    for r in pending:
+        skills = ", ".join(json.loads(r["matched_skills"]) if isinstance(r["matched_skills"], str) else (r["matched_skills"] or []))
+        rid = r["id"]
+        reason_opts = "".join(f'<option value="{x}">{x}</option>' for x in _REJECT_REASONS)
+        rows_html += f"""
+        <tr>
+          <td><b>{html.escape(r['job_title'] or '')}</b><br>
+              <span style="color:#64748b">{html.escape(r['company'] or '')} · {html.escape(r['location'] or '')}</span>
+              {'<br><a href="' + html.escape(r['source_url']) + '" target="_blank" style="font-size:11px;color:#3b82f6">Stellenanzeige</a>' if r.get('source_url') else ''}
+          </td>
+          <td style="white-space:nowrap">{html.escape(r['course'] or '')}</td>
+          <td><span class="score {score_cls(r['fit_score'] or 0)}">{r['fit_score']}</span></td>
+          <td style="font-size:12px;max-width:200px">{html.escape(r['fit_reason'] or '')}<br>
+              <span style="color:#22c55e">+ {html.escape(skills)}</span></td>
+          <td>
+            <form method="post" action="/api/qa/{rid}/approve">
+              <button class="btn btn-approve" type="submit">Approve</button>
+            </form>
+            <form method="post" action="/api/qa/{rid}/reject" style="margin-top:4px">
+              <select name="reason">{reason_opts}</select>
+              <button class="btn btn-reject" type="submit">Reject</button>
+            </form>
+          </td>
+        </tr>"""
+
+    empty = '<tr><td colspan="5" class="empty">Keine offenen Reviews — alle Stellen bearbeitet.</td></tr>' if not pending else ""
+
+    return HTMLResponse(f"""<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<title>JobRadar QA</title>{_QA_CSS}</head><body>
+<div class="header">
+  <div>
+    <h1>&#127919; JobRadar QA Review</h1>
+    <a class="back" href="/admin">&#8592; Admin Dashboard</a>
+  </div>
+  <span class="badge">{len(pending)} offen</span>
+</div>
+<div class="container">
+  <div class="stats">
+    <div class="stat"><div class="stat-n">{len(pending)}</div><div class="stat-l">Offen (fit &ge;55)</div></div>
+    <div class="stat"><div class="stat-n" style="color:#22c55e">{n_app}</div><div class="stat-l">Approved</div></div>
+    <div class="stat"><div class="stat-n" style="color:#ef4444">{n_rej}</div><div class="stat-l">Rejected</div></div>
+  </div>
+  <table>
+    <thead><tr><th>Stelle</th><th>Kurs</th><th>Score</th><th>Matching</th><th>Aktion</th></tr></thead>
+    <tbody>{rows_html}{empty}</tbody>
+  </table>
+</div></body></html>""")
+
+
+@app.post("/api/qa/{match_id}/approve", include_in_schema=False)
+def qa_approve(match_id: str):
+    try:
+        pg_exec(
+            "UPDATE job_matches SET status='approved', reviewed=true WHERE id=%s",
+            (match_id,)
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/qa", status_code=303)
+
+
+@app.post("/api/qa/{match_id}/reject", request_class=None, include_in_schema=False)
+async def qa_reject(match_id: str, request: Request):
+    form = await request.form()
+    reason = form.get("reason", "other")
+    if reason not in _REJECT_REASONS:
+        reason = "other"
+    try:
+        pg_exec(
+            "UPDATE job_matches SET status='rejected', reviewed=true, reject_reason=%s WHERE id=%s",
+            (reason, match_id)
+        )
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/qa", status_code=303)
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
