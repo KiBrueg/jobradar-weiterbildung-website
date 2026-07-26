@@ -3,15 +3,26 @@ import { Radar, ArrowRight } from 'lucide-react';
 import { goLanding, goReferenzen, goAdmin } from '@/App';
 
 const navItems = [
-  { label: 'Loesung', href: '#loesung', route: 'landing' as const },
-  { label: 'Fuer Bildungstraeger', href: '#bildungstraeger', route: 'landing' as const },
-  { label: 'Ablauf', href: '#ablauf', route: 'landing' as const },
-  { label: 'Referenzen', href: '#', route: 'referenzen' as const },
-  { label: 'Admin Demo', href: '#preview', route: 'admin' as const },
+  { label: 'Loesung', route: 'landing' as const },
+  { label: 'Fuer Bildungstraeger', route: 'landing' as const },
+  { label: 'Ablauf', route: 'landing' as const },
+  { label: 'Referenzen', route: 'referenzen' as const },
+  { label: 'Admin Demo', route: 'admin' as const },
 ];
+
+function currentPath() {
+  return window.location.pathname.replace(/\/$/, '') || '/';
+}
 
 export default function PublicHeader() {
   const [mobileNav, setMobileNav] = useState(false);
+  const path = currentPath();
+
+  const routePath: Record<string, string> = {
+    landing: '/',
+    referenzen: '/referenzen',
+    admin: '/admin',
+  };
 
   const navItem = (n: (typeof navItems)[number]) => {
     setMobileNav(false);
@@ -24,7 +35,7 @@ export default function PublicHeader() {
     <header className="sticky top-0 z-40 glass border-b border-ink-200/60" role="banner">
       <div className="mx-auto max-w-7xl px-5 sm:px-8">
         <div className="flex h-16 items-center justify-between">
-          <button onClick={goLanding} className="flex items-center gap-2.5 group">
+          <button onClick={goLanding} className="flex items-center gap-2.5 group" aria-label="JobRadar Weiterbildung Startseite">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink-900 text-white transition-transform group-hover:scale-105">
               <Radar className="h-5 w-5" />
             </span>
@@ -34,7 +45,12 @@ export default function PublicHeader() {
           </button>
           <nav className="hidden md:flex items-center gap-7" aria-label="Hauptnavigation">
             {navItems.map((n) => (
-              <button key={n.label} onClick={() => navItem(n)} className="nav-link">
+              <button
+                key={n.label}
+                onClick={() => navItem(n)}
+                className="nav-link"
+                aria-current={path === routePath[n.route] ? 'page' : undefined}
+              >
                 {n.label}
               </button>
             ))}
@@ -47,7 +63,7 @@ export default function PublicHeader() {
             <button
               onClick={() => setMobileNav((v) => !v)}
               className="md:hidden btn-ghost px-2"
-              aria-label="Menue"
+              aria-label={mobileNav ? 'Menue schliessen' : 'Menue oeffnen'}
               aria-expanded={mobileNav}
               aria-controls="mobile-nav-public"
             >
@@ -66,6 +82,7 @@ export default function PublicHeader() {
                 key={n.label}
                 onClick={() => navItem(n)}
                 className="text-left px-3 py-2 rounded-lg text-sm font-medium text-ink-700 hover:bg-ink-100"
+                aria-current={path === routePath[n.route] ? 'page' : undefined}
               >
                 {n.label}
               </button>

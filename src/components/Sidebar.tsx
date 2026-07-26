@@ -93,7 +93,7 @@ export default function Sidebar({
         <div className="px-4 py-4 border-t border-ink-200">
           <div className="rounded-xl bg-ink-50 p-3">
             <p className="text-xs font-semibold text-ink-700">Local MVP</p>
-            <p className="mt-1 text-xs text-ink-500 leading-relaxed">Mock-Daten, kein Backend. Bereit fuer spaetere Integration.</p>
+            <p className="mt-1 text-xs text-ink-500 leading-relaxed">React + FastAPI verbunden. CEO-KPIs laden live aus der lokalen API.</p>
           </div>
         </div>
       </aside>

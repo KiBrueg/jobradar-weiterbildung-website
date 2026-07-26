@@ -197,21 +197,59 @@ export const documentTypes = [
 export const leadStatuses: LeadStatus[] = ['Candidate', 'QA Needed', 'Approved', 'Rejected'];
 
 export const testPayload = {
-  workflow_name: 'Flow 4 Job APIs - Integration Test',
-  run_mode: 'test',
-  items: [
-    {
-      course_id: 1,
-      title: 'Junior Data Analyst Remote',
-      provider: 'Acme GmbH',
-      status: 'Candidate',
-      score: 77,
-      source_url: 'https://example.com/job',
-      why_fit: 'Matches SQL/Power BI profile',
-      missing_evidence: 'QA check needed',
-      risks: 'Check seniority and language requirement',
+  step_1_get_tasks: {
+    method: 'GET',
+    path: '/api/n8n/search-tasks',
+  },
+  step_2_workflow_run: {
+    method: 'POST',
+    path: '/api/n8n/workflow-runs',
+    body: {
+      workflow_name: 'Flow 4 Job APIs - Integration Test',
+      run_mode: 'test',
+      status: 'completed',
+      input_count: 3,
+      output_count: 1,
+      note: 'n8n smoke run',
     },
-  ],
+  },
+  step_3_source_run: {
+    method: 'POST',
+    path: '/api/n8n/source-runs',
+    body: {
+      workflow_run_id: 123,
+      items: [{ source_name: 'RemoteOK', source_type: 'job_board', raw_items: 25, normalized_items: 23, duplicate_items: 4, relevant_items: 6, failed_items: 0, quality_score: 91, risk_level: 'low' }],
+    },
+  },
+  step_4_cost_event: {
+    method: 'POST',
+    path: '/api/n8n/cost-events',
+    body: {
+      workflow_run_id: 123,
+      items: [{ tool_name: 'OpenRouter', tool_type: 'llm', source_name: 'RemoteOK', units: 1200, unit_type: 'tokens', estimated_cost: 0.002 }],
+    },
+  },
+  step_5_leads: {
+    method: 'POST',
+    path: '/api/n8n/leads',
+    body: {
+      workflow_name: 'Flow 4 Job APIs - Integration Test',
+      run_mode: 'test',
+      items: [
+        {
+          course_id: 1,
+          title: 'Junior Data Analyst Remote',
+          provider: 'Acme GmbH',
+          status: 'Candidate',
+          score: 77,
+          source_url: 'https://example.com/job',
+          why_fit: 'Matches SQL/Power BI profile',
+          missing_evidence: 'QA check needed',
+          risks: 'Check seniority and language requirement',
+        },
+      ],
+    },
+  },
 };
 
 export function schoolName(id: number): string {

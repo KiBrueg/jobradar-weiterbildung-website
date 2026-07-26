@@ -653,11 +653,15 @@ export default function AdminDashboard() {
                 <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
                 <p className="text-sm text-amber-800">Tunnel URLs sind temporaer. Fuer Production sollte eine stabile Deployment-URL verwendet werden.</p>
               </div>
-              <div className="grid md:grid-cols-3 gap-4">
+              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {[
                   { method: 'GET', path: '/api/n8n/search-tasks', desc: 'n8n liest aktive Kurs-Suchprofile.' },
-                  { method: 'POST', path: '/api/n8n/leads', desc: 'n8n sendet normalisierte Leads zurueck.' },
-                  { method: 'GET', path: '/api/n8n/runs', desc: 'Workflow-Runs und Testlaeufe anzeigen.' },
+                  { method: 'GET', path: '/api/n8n/status', desc: 'Live Status: Runs, Sources, Kosten und Leads.' },
+                  { method: 'POST', path: '/api/n8n/workflow-runs', desc: 'n8n protokolliert Workflow-Run und Output-Zahlen.' },
+                  { method: 'POST', path: '/api/n8n/source-runs', desc: 'n8n schreibt Quellenqualität, Treffer und Fehler.' },
+                  { method: 'POST', path: '/api/n8n/cost-events', desc: 'n8n schreibt API/LLM/Tool-Kosten.' },
+                  { method: 'POST', path: '/api/n8n/leads', desc: 'n8n sendet normalisierte Leads zurück.' },
+                  { method: 'GET', path: '/api/n8n/runs', desc: 'Workflow-Runs und Testläufe anzeigen.' },
                 ].map((e) => (
                   <div key={e.path} className="card p-5">
                     <div className="flex items-center gap-2 mb-2">
