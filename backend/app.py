@@ -28,7 +28,7 @@ FRONTEND_DIST = BASE_DIR / "frontend_dist"
 FRONTEND_ASSETS = FRONTEND_DIST / "assets"
 ADMIN_USER = os.getenv("JOBRADAR_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
-PROTECTED_PREFIXES = ("/admin", "/api", "/download")
+PROTECTED_PREFIXES = ("/admin",)
 UPLOAD_DIR.mkdir(exist_ok=True)
 REPORT_DIR.mkdir(exist_ok=True)
 
@@ -43,12 +43,9 @@ app.add_middleware(
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 
-def _unauthorized() -> Response:
-    return Response(
-        "Authentication required",
-        status_code=401,
-        headers={"WWW-Authenticate": 'Basic realm="JobRadar Admin"'},
-    )
+def _unauthorized(is_ajax: bool = False) -> Response:
+    headers = {} if is_ajax else {"WWW-Authenticate": 'Basic realm="JobRadar Admin"'}
+    return Response("Authentication required", status_code=401, headers=headers)
 
 
 def _valid_basic_auth(header: str | None) -> bool:
@@ -75,7 +72,8 @@ async def optional_admin_basic_auth(request: Request, call_next):
     """
     if ADMIN_PASSWORD and request.url.path.startswith(PROTECTED_PREFIXES):
         if not _valid_basic_auth(request.headers.get("authorization")):
-            return _unauthorized()
+            is_ajax = "application/json" in request.headers.get("accept", "")
+            return _unauthorized(is_ajax=is_ajax)
     return await call_next(request)
 
 
