@@ -21,11 +21,11 @@ import FeedbackFormMockup from '@/components/references/FeedbackFormMockup';
 import CaseStudyTemplate from '@/components/references/CaseStudyTemplate';
 
 const navItems = [
-  { label: 'Loesung', href: '#loesung', route: 'landing' as const },
-  { label: 'Fuer Bildungstraeger', href: '#bildungstraeger', route: 'landing' as const },
-  { label: 'Ablauf', href: '#ablauf', route: 'landing' as const },
-  { label: 'Referenzen', href: '#', route: 'referenzen' as const },
-  { label: 'Admin Demo', href: '#preview', route: 'admin' as const },
+  { label: 'Loesung', route: 'landing' as const },
+  { label: 'Fuer Bildungstraeger', route: 'landing' as const },
+  { label: 'Ablauf', route: 'landing' as const },
+  { label: 'Referenzen', route: 'referenzen' as const },
+  { label: 'Admin Demo', route: 'admin' as const },
 ];
 
 const categories = [
@@ -60,7 +60,7 @@ export default function ReferencesPage() {
       <header className="sticky top-0 z-40 glass border-b border-ink-200/60">
         <div className="mx-auto max-w-7xl px-5 sm:px-8">
           <div className="flex h-16 items-center justify-between">
-            <button onClick={goLanding} className="flex items-center gap-2.5 group">
+            <button onClick={goLanding} className="flex items-center gap-2.5 group" aria-label="JobRadar Weiterbildung Startseite">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink-900 text-white transition-transform group-hover:scale-105">
                 <Radar className="h-5 w-5" />
               </span>
@@ -68,9 +68,9 @@ export default function ReferencesPage() {
                 JobRadar <span className="text-ink-500 font-normal">Weiterbildung</span>
               </span>
             </button>
-            <nav className="hidden md:flex items-center gap-7">
+            <nav className="hidden md:flex items-center gap-7" aria-label="Hauptnavigation">
               {navItems.map((n) => (
-                <button key={n.label} onClick={() => navItem(n)} className="nav-link">
+                <button key={n.label} onClick={() => navItem(n)} className="nav-link" aria-current={n.route === 'referenzen' ? 'page' : undefined}>
                   {n.label}
                 </button>
               ))}
@@ -83,19 +83,22 @@ export default function ReferencesPage() {
               <button
                 onClick={() => setMobileNav((v) => !v)}
                 className="md:hidden btn-ghost px-2"
-                aria-label="Menue"
+                aria-label={mobileNav ? 'Menue schliessen' : 'Menue oeffnen'}
+                aria-expanded={mobileNav}
+                aria-controls="mobile-nav-references"
               >
                 <span className="text-xl leading-none">{mobileNav ? '\u00d7' : '\u2630'}</span>
               </button>
             </div>
           </div>
           {mobileNav && (
-            <nav className="md:hidden pb-4 flex flex-col gap-1 animate-fade-in">
+            <nav id="mobile-nav-references" className="md:hidden pb-4 flex flex-col gap-1 animate-fade-in" aria-label="Mobile Navigation">
               {navItems.map((n) => (
                 <button
                   key={n.label}
                   onClick={() => navItem(n)}
                   className="text-left px-3 py-2 rounded-lg text-sm font-medium text-ink-700 hover:bg-ink-100"
+                  aria-current={n.route === 'referenzen' ? 'page' : undefined}
                 >
                   {n.label}
                 </button>
@@ -265,8 +268,8 @@ export default function ReferencesPage() {
           </div>
         </div>
       </PageSection>
-      </main>
 
+      </main>
       <PublicFooter />
     </div>
   );
