@@ -1,0 +1,948 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import csv
+import html
+import json
+import os
+import secrets
+import shutil
+import sqlite3
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "jobradar.sqlite3"
+UPLOAD_DIR = BASE_DIR / "uploads"
+REPORT_DIR = BASE_DIR / "reports"
+FRONTEND_DIST = BASE_DIR / "frontend_dist"
+FRONTEND_ASSETS = FRONTEND_DIST / "assets"
+ADMIN_USER = os.getenv("JOBRADAR_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
+PROTECTED_PREFIXES = ("/admin", "/api", "/download")
+UPLOAD_DIR.mkdir(exist_ok=True)
+REPORT_DIR.mkdir(exist_ok=True)
+
+app = FastAPI(title="JobRadar Admin")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _unauthorized() -> Response:
+    return Response(
+        "Authentication required",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="JobRadar Admin"'},
+    )
+
+
+def _valid_basic_auth(header: str | None) -> bool:
+    if not ADMIN_PASSWORD:
+        return True
+    if not header or not header.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(header.removeprefix("Basic "), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        return False
+    return secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASSWORD)
+
+
+@app.middleware("http")
+async def optional_admin_basic_auth(request: Request, call_next):
+    """Protect admin/API/downloads when JOBRADAR_ADMIN_PASSWORD is configured.
+
+    Local development remains passwordless by default; set
+    JOBRADAR_ADMIN_PASSWORD before exposing the MVP beyond localhost.
+    """
+    if ADMIN_PASSWORD and request.url.path.startswith(PROTECTED_PREFIXES):
+        if not _valid_basic_auth(request.headers.get("authorization")):
+            return _unauthorized()
+    return await call_next(request)
+
+
+app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+if FRONTEND_ASSETS.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_ASSETS)), name="frontend_assets")
+
+
+def db() -> sqlite3.Connection:
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    return con
+
+
+def now() -> str:
+    return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def rows(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
+    with db() as con:
+        return [dict(r) for r in con.execute(sql, params).fetchall()]
+
+
+def one(sql: str, params: tuple = ()) -> dict[str, Any] | None:
+    with db() as con:
+        r = con.execute(sql, params).fetchone()
+        return dict(r) if r else None
+
+
+def exec_sql(sql: str, params: tuple = ()) -> int:
+    with db() as con:
+        cur = con.execute(sql, params)
+        con.commit()
+        return int(cur.lastrowid)
+
+
+def table_columns(con: sqlite3.Connection, table: str) -> set[str]:
+    return {r[1] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def init_db() -> None:
+    with db() as con:
+        con.execute("PRAGMA foreign_keys=ON")
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS schools (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              website TEXT DEFAULT '',
+              contact_email TEXT DEFAULT '',
+              status TEXT DEFAULT 'active',
+              note TEXT DEFAULT '',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS courses (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL,
+              provider TEXT NOT NULL DEFAULT '',
+              funding TEXT DEFAULT '',
+              remote TEXT DEFAULT '',
+              fit_score INTEGER DEFAULT 0,
+              status TEXT DEFAULT 'active',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS search_profiles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              course_id INTEGER NOT NULL UNIQUE REFERENCES courses(id) ON DELETE CASCADE,
+              access_mode TEXT NOT NULL DEFAULT 'Internal admin only',
+              target_titles TEXT DEFAULT '',
+              skills TEXT DEFAULT '',
+              location_rules TEXT DEFAULT '',
+              language_rules TEXT DEFAULT '',
+              exclude_titles TEXT DEFAULT '',
+              source_queries TEXT DEFAULT '',
+              coach_note TEXT DEFAULT '',
+              active INTEGER DEFAULT 1,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS leads (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+              title TEXT NOT NULL,
+              provider TEXT DEFAULT '',
+              status TEXT DEFAULT 'New',
+              score INTEGER DEFAULT 0,
+              cost TEXT DEFAULT '',
+              why_fit TEXT DEFAULT '',
+              missing_evidence TEXT DEFAULT '',
+              risks TEXT DEFAULT '',
+              sources TEXT DEFAULT '',
+              email_draft TEXT DEFAULT '',
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS documents (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+              filename TEXT NOT NULL,
+              original_name TEXT NOT NULL,
+              doc_type TEXT DEFAULT 'course document',
+              access TEXT DEFAULT 'admin',
+              status TEXT DEFAULT 'uploaded',
+              note TEXT DEFAULT '',
+              uploaded_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS access_roles (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              role TEXT NOT NULL UNIQUE,
+              allowed TEXT NOT NULL,
+              denied TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS change_requests (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+              field TEXT NOT NULL,
+              old_value TEXT DEFAULT '',
+              new_value TEXT NOT NULL,
+              requested_by TEXT DEFAULT 'provider/coach',
+              status TEXT DEFAULT 'pending',
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS workflow_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_name TEXT NOT NULL,
+              run_mode TEXT DEFAULT 'test',
+              status TEXT DEFAULT 'started',
+              input_count INTEGER DEFAULT 0,
+              output_count INTEGER DEFAULT 0,
+              note TEXT DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+            """
+        )
+        # Safe migration for older DB created before schools table.
+        cols = table_columns(con, "courses")
+        if "school_id" not in cols:
+            con.execute("ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL")
+        if "provider" not in table_columns(con, "courses"):
+            con.execute("ALTER TABLE courses ADD COLUMN provider TEXT DEFAULT ''")
+        existing_courses = con.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
+        seed_time = now()
+        if not existing_courses:
+            seed_schools = [
+                ("AZAV Academy", "", "", "active", "Seed provider for data analyst course"),
+                ("Data School EU", "", "", "active", "Seed provider for AI automation/n8n course"),
+                ("Future Skills GmbH", "", "", "active", "Seed provider for SAP/data course"),
+                ("BI Campus", "", "", "active", "Seed provider for BI course"),
+                ("Remote Code School", "", "", "risk", "Seed provider with lower-fit Python bootcamp"),
+            ]
+            con.executemany(
+                "INSERT OR IGNORE INTO schools(name,website,contact_email,status,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                [(a, b, c, d, e, seed_time, seed_time) for a, b, c, d, e in seed_schools],
+            )
+            school_ids = {r["name"]: r["id"] for r in con.execute("SELECT id,name FROM schools")}
+            seed_courses = [
+                ("Data Analyst Weiterbildung", "AZAV Academy", "Bildungsgutschein", "Yes", 92, "active"),
+                ("AI Automation / n8n Course", "Data School EU", "AZAV pending", "Yes", 89, "active"),
+                ("SAP + Data Basics", "Future Skills GmbH", "Confirmed", "Hybrid risk", 84, "review"),
+                ("Business Intelligence Track", "BI Campus", "Bildungsgutschein", "Yes", 88, "active"),
+                ("Python Backend Bootcamp", "Remote Code School", "Unknown", "Yes", 71, "risk"),
+            ]
+            con.executemany(
+                "INSERT INTO courses(name,school_id,provider,funding,remote,fit_score,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                [(name, school_ids[provider], provider, funding, remote, score, status, seed_time, seed_time) for name, provider, funding, remote, score, status in seed_courses],
+            )
+        # Ensure every provider string has a school row and school_id is filled.
+        providers = [r["provider"] for r in con.execute("SELECT DISTINCT provider FROM courses WHERE COALESCE(provider,'')<>''")]
+        for provider in providers:
+            con.execute(
+                "INSERT OR IGNORE INTO schools(name,status,note,created_at,updated_at) VALUES(?,?,?,?,?)",
+                (provider, "active", "Migrated from course provider", seed_time, seed_time),
+            )
+            sid = con.execute("SELECT id FROM schools WHERE name=?", (provider,)).fetchone()[0]
+            con.execute("UPDATE courses SET school_id=? WHERE provider=? AND (school_id IS NULL OR school_id='')", (sid, provider))
+        course_ids = {r["name"]: r["id"] for r in con.execute("SELECT id,name FROM courses")}
+        profile_count = con.execute("SELECT COUNT(*) FROM search_profiles").fetchone()[0]
+        if not profile_count:
+            profiles = {
+                "Data Analyst Weiterbildung": ("Provider can suggest changes", "Junior Data Analyst\nBI Analyst\nReporting Analyst\nData Quality Analyst", "SQL, Excel, Power BI, Python basics, dashboards, data cleaning", "Remote Germany / EU, Berlin optional, no on-site requirement", "German B1/B2 OK, English OK, entry-level or junior only", "Senior, Lead, Manager, 5+ years, pure controlling, on-site only", "site:arbeitsagentur.de Data Analyst Junior Remote\nJunior BI Analyst Berlin Remote\nData Quality Analyst Einstieg", "Coach focus: realistic entry titles and skill gaps."),
+                "AI Automation / n8n Course": ("Provider can view", "AI Automation Specialist\nn8n Automation Builder\nJunior Automation Consultant\nWorkflow Automation Assistant", "n8n, Zapier, APIs, Webhooks, LLM prompts, Airtable/Sheets, basic JavaScript", "Remote DE/EU only; no travel-heavy consulting", "German/English, junior or freelance project-friendly", "Senior consultant, pure sales, heavy DevOps/SRE, on-site workshops only", "n8n automation remote Germany\nAI automation junior remote\nWorkflow automation assistant", "Coach focus: tool-choice, prompt versioning, evals and approval gates."),
+                "SAP + Data Basics": ("Internal admin only", "Junior SAP Data Analyst\nERP Reporting Assistant\nSAP Support Analyst Junior\nOData / Integration Assistant", "SAP basics, Excel, SQL, OData, reporting, process documentation", "Remote preferred; hybrid risk must be flagged", "German required, junior only", "Senior SAP consultant, ABAP expert, travel required, full on-site", "Junior SAP Data Analyst Remote\nERP Reporting Assistant Einstieg\nSAP Support Junior Berlin", "Coach focus: SAP basics to business-process portfolio demos."),
+                "Business Intelligence Track": ("Coach can edit criteria", "Junior BI Analyst\nPower BI Developer Junior\nReporting Specialist Junior\nData Visualization Analyst", "Power BI, SQL, DAX basics, dashboards, stakeholder reporting", "Remote/hybrid-light Germany, no permanent on-site", "German B1/B2, English OK, entry-level", "Senior BI architect, team lead, pure finance controlling, 5+ years", "Junior BI Analyst Remote Germany\nPower BI Junior Berlin\nReporting Specialist Einstieg", "Coach focus: derive portfolio dashboard exercises from vacancies."),
+            }
+            con.executemany(
+                """INSERT OR IGNORE INTO search_profiles(course_id,access_mode,target_titles,skills,location_rules,language_rules,exclude_titles,source_queries,coach_note,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                [(course_ids[name], *vals, seed_time) for name, vals in profiles.items() if name in course_ids],
+            )
+        lead_count = con.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
+        if not lead_count:
+            leads = [
+                (course_ids["Data Analyst Weiterbildung"], "Data Analyst Weiterbildung", "AZAV Academy", "New", 92, "€0.42", "Remote DE/EU and data-analysis focus match filters.\nGood proof for smart database and reporting dashboard.", "Current curriculum URL\nAZAV proof\nPlacement stats", "Cite provider claims before export.\nNo personal data before approval.", "provider page: needs citation\ncourse PDF: not indexed", "Hallo AZAV Academy,\n\nich prüfe passende remote-fähige Weiterbildungen im Bereich Data Analytics / AI Automation. Können Sie bitte bestätigen, ob der Kurs aktuell per Bildungsgutschein/AZAV förderbar ist?\n\nVielen Dank"),
+                (course_ids["AI Automation / n8n Course"], "AI Automation / n8n Course", "Data School EU", "Strong fit", 89, "€0.31", "Directly fits AI automation/n8n positioning.\nUseful for tool-choice, prompt registry and eval proof.", "AZAV status\nProject examples\nRemote exam rules", "May be unsuitable if funding is not confirmed.", "remote option confirmed\nAZAV missing", "Hallo Data School EU,\n\nkönnen Sie bestätigen, ob der AI Automation / n8n Kurs aktuell AZAV-/Bildungsgutschein-fähig ist?\n\nFreundliche Grüße"),
+                (course_ids["SAP + Data Basics"], "SAP + Data Basics", "Future Skills GmbH", "Waiting", 84, "€0.28", "SAP-adjacent angle supports SAP portfolio track.\nGood bridge between ERP/data/automation.", "Remote-only confirmation\nConcrete SAP tooling\nUpdated funding page", "Hybrid/on-site risk conflicts with filters.", "funding confirmed\nremote hybrid risk", "Hallo Future Skills GmbH,\n\nist die Teilnahme vollständig remote möglich und welche SAP-/ERP-Technologien werden praktisch genutzt?\n\nVielen Dank"),
+                (course_ids["Python Backend Bootcamp"], "Python Backend Bootcamp", "Remote Code School", "Risk", 71, "€0.19", "Backend/API can support automation, but weaker than data/AI course focus.", "Funding unknown\nAI/data relevance weak\nPlacement not proven", "May become generic coding bootcamp instead of AI automation path.", "remote yes\nfunding unknown", "Hallo Remote Code School,\n\nist der Python Backend Bootcamp per Bildungsgutschein förderbar und enthält er APIs, Datenpipelines oder Automatisierung?\n\nFreundliche Grüße"),
+            ]
+            con.executemany(
+                """INSERT INTO leads(course_id,title,provider,status,score,cost,why_fit,missing_evidence,risks,sources,email_draft,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                [(*l, seed_time) for l in leads if l[0]],
+            )
+        con.executemany(
+            "INSERT OR IGNORE INTO access_roles(role,allowed,denied) VALUES(?,?,?)",
+            [
+                ("Provider", "View own school/courses; upload documents; suggest search profile changes", "Other schools; private data; budgets; raw inbox; external sending"),
+                ("Coach", "Edit assigned course criteria; add coach report notes; review matches", "System settings; other schools unless assigned; public exports without approval"),
+                ("Admin", "Add/rename/archive schools and courses; approve changes; export reports", "None; still uses audit/approval for external actions"),
+                ("AI Agent", "Read approved config; draft summaries; flag risks", "Direct external actions; private data not needed for task"),
+            ],
+        )
+        con.commit()
+
+
+@app.on_event("startup")
+def startup() -> None:
+    init_db()
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return FileResponse(react_index)
+    return templates.TemplateResponse(request, "index.html", {})
+
+
+@app.get("/api/dashboard")
+def dashboard() -> dict[str, Any]:
+    init_db()
+    schools = rows("SELECT * FROM schools ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, name")
+    courses = rows(
+        """SELECT c.*, COALESCE(s.name,c.provider) AS school_name, s.status AS school_status
+           FROM courses c LEFT JOIN schools s ON s.id=c.school_id
+           ORDER BY CASE c.status WHEN 'archived' THEN 1 ELSE 0 END, school_name, c.name"""
+    )
+    profiles = rows(
+        """SELECT sp.*, c.name AS course_name, c.provider, c.school_id, COALESCE(s.name,c.provider) AS school_name
+           FROM search_profiles sp JOIN courses c ON c.id=sp.course_id
+           LEFT JOIN schools s ON s.id=c.school_id
+           WHERE c.status<>'archived'
+           ORDER BY school_name, c.name"""
+    )
+    leads = rows("SELECT * FROM leads ORDER BY score DESC, updated_at DESC")
+    documents = rows(
+        """SELECT d.*, c.name AS course_name, COALESCE(s.name,c.provider) AS school_name
+           FROM documents d LEFT JOIN courses c ON c.id=d.course_id
+           LEFT JOIN schools s ON s.id=c.school_id ORDER BY uploaded_at DESC"""
+    )
+    roles = rows("SELECT * FROM access_roles ORDER BY role")
+    requests = rows(
+        """SELECT cr.*, c.name AS course_name, COALESCE(s.name,c.provider) AS school_name
+           FROM change_requests cr LEFT JOIN courses c ON c.id=cr.course_id
+           LEFT JOIN schools s ON s.id=c.school_id ORDER BY cr.created_at DESC LIMIT 50"""
+    )
+    school_stats = rows(
+        """
+        SELECT s.id AS school_id, s.name AS school_name, s.status,
+               COUNT(DISTINCT CASE WHEN c.status<>'archived' THEN c.id END) AS active_courses,
+               COUNT(DISTINCT c.id) AS total_courses,
+               COUNT(DISTINCT sp.id) AS search_profiles,
+               COUNT(DISTINCT l.id) AS leads,
+               COUNT(DISTINCT d.id) AS documents,
+               COUNT(DISTINCT CASE WHEN cr.status='pending' THEN cr.id END) AS pending_changes,
+               ROUND(COALESCE(AVG(l.score),0),1) AS avg_score
+        FROM schools s
+        LEFT JOIN courses c ON c.school_id=s.id
+        LEFT JOIN search_profiles sp ON sp.course_id=c.id
+        LEFT JOIN leads l ON l.course_id=c.id
+        LEFT JOIN documents d ON d.course_id=c.id
+        LEFT JOIN change_requests cr ON cr.course_id=c.id
+        GROUP BY s.id, s.name, s.status
+        ORDER BY CASE s.status WHEN 'active' THEN 0 ELSE 1 END, s.name
+        """
+    )
+    active_courses = [c for c in courses if c["status"] != "archived"]
+    return {
+        "schools": schools,
+        "courses": courses,
+        "profiles": profiles,
+        "leads": leads,
+        "documents": documents,
+        "roles": roles,
+        "change_requests": requests,
+        "school_stats": school_stats,
+        "kpis": {
+            "schools": len([s for s in schools if s["status"] != "archived"]),
+            "courses": len(active_courses),
+            "profiles": len(profiles),
+            "leads": len(leads),
+            "documents": len(documents),
+            "pending_changes": len([r for r in requests if r["status"] == "pending"]),
+        },
+    }
+
+
+@app.post("/api/schools")
+async def create_school(request: Request) -> dict[str, Any]:
+    data = await request.json()
+    name = (data.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "school name required")
+    sid = exec_sql(
+        "INSERT INTO schools(name,website,contact_email,status,note,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+        (name, data.get("website", ""), data.get("contact_email", ""), "active", data.get("note", ""), now(), now()),
+    )
+    return {"ok": True, "school": one("SELECT * FROM schools WHERE id=?", (sid,))}
+
+
+@app.put("/api/schools/{school_id}")
+async def update_school(school_id: int, request: Request) -> dict[str, Any]:
+    data = await request.json()
+    existing = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not existing:
+        raise HTTPException(404, "school not found")
+    exec_sql(
+        "UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,updated_at=? WHERE id=?",
+        (
+            (data.get("name") or existing["name"]).strip(),
+            data.get("website", existing["website"]),
+            data.get("contact_email", existing["contact_email"]),
+            data.get("status", existing["status"]),
+            data.get("note", existing["note"]),
+            now(),
+            school_id,
+        ),
+    )
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    exec_sql("UPDATE courses SET provider=?,updated_at=? WHERE school_id=?", (school["name"], now(), school_id))
+    return {"ok": True, "school": school}
+
+
+@app.post("/api/schools/{school_id}/archive")
+def archive_school(school_id: int) -> dict[str, Any]:
+    if not one("SELECT * FROM schools WHERE id=?", (school_id,)):
+        raise HTTPException(404, "school not found")
+    exec_sql("UPDATE schools SET status='archived',updated_at=? WHERE id=?", (now(), school_id))
+    exec_sql("UPDATE courses SET status='archived',updated_at=? WHERE school_id=?", (now(), school_id))
+    return {"ok": True}
+
+
+@app.post("/api/courses")
+async def create_course(request: Request) -> dict[str, Any]:
+    data = await request.json()
+    name = (data.get("name") or "").strip()
+    school_id = int(data.get("school_id") or 0)
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not name or not school:
+        raise HTTPException(400, "course name and valid school_id required")
+    cid = exec_sql(
+        "INSERT INTO courses(name,school_id,provider,funding,remote,fit_score,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (name, school_id, school["name"], data.get("funding", ""), data.get("remote", ""), int(data.get("fit_score") or 0), "active", now(), now()),
+    )
+    exec_sql(
+        """INSERT INTO search_profiles(course_id,access_mode,target_titles,skills,location_rules,language_rules,exclude_titles,source_queries,coach_note,updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (cid, "Internal admin only", "", "", "Remote Germany / EU preferred", "Entry-level / junior only", "Senior, Lead, Manager, 5+ years", "", "", now()),
+    )
+    return {"ok": True, "course": one("SELECT * FROM courses WHERE id=?", (cid,))}
+
+
+@app.put("/api/courses/{course_id}")
+async def update_course(course_id: int, request: Request) -> dict[str, Any]:
+    data = await request.json()
+    existing = one("SELECT * FROM courses WHERE id=?", (course_id,))
+    if not existing:
+        raise HTTPException(404, "course not found")
+    school_id = int(data.get("school_id") or existing["school_id"] or 0)
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    provider = school["name"] if school else existing["provider"]
+    exec_sql(
+        "UPDATE courses SET name=?,school_id=?,provider=?,funding=?,remote=?,fit_score=?,status=?,updated_at=? WHERE id=?",
+        (
+            (data.get("name") or existing["name"]).strip(),
+            school_id,
+            provider,
+            data.get("funding", existing["funding"]),
+            data.get("remote", existing["remote"]),
+            int(data.get("fit_score", existing["fit_score"]) or 0),
+            data.get("status", existing["status"]),
+            now(),
+            course_id,
+        ),
+    )
+    return {"ok": True, "course": one("SELECT * FROM courses WHERE id=?", (course_id,))}
+
+
+@app.post("/api/courses/{course_id}/archive")
+def archive_course(course_id: int) -> dict[str, Any]:
+    if not one("SELECT * FROM courses WHERE id=?", (course_id,)):
+        raise HTTPException(404, "course not found")
+    exec_sql("UPDATE courses SET status='archived',updated_at=? WHERE id=?", (now(), course_id))
+    return {"ok": True}
+
+
+@app.put("/api/profiles/{profile_id}")
+async def update_profile(profile_id: int, request: Request) -> dict[str, Any]:
+    data = await request.json()
+    allowed = ["access_mode", "target_titles", "skills", "location_rules", "language_rules", "exclude_titles", "source_queries", "coach_note", "active"]
+    existing = one("SELECT * FROM search_profiles WHERE id=?", (profile_id,))
+    if not existing:
+        raise HTTPException(404, "profile not found")
+    values = {k: data.get(k, existing.get(k)) for k in allowed}
+    exec_sql(
+        """UPDATE search_profiles SET access_mode=?,target_titles=?,skills=?,location_rules=?,language_rules=?,exclude_titles=?,source_queries=?,coach_note=?,active=?,updated_at=? WHERE id=?""",
+        (values["access_mode"], values["target_titles"], values["skills"], values["location_rules"], values["language_rules"], values["exclude_titles"], values["source_queries"], values["coach_note"], int(values["active"]), now(), profile_id),
+    )
+    return {"ok": True, "profile": one("SELECT * FROM search_profiles WHERE id=?", (profile_id,))}
+
+
+@app.post("/api/change-requests")
+async def create_change_request(request: Request) -> dict[str, Any]:
+    data = await request.json()
+    course_id = int(data.get("course_id") or 0)
+    field = (data.get("field") or "criteria").strip()
+    new_value = (data.get("new_value") or "").strip()
+    requested_by = (data.get("requested_by") or "provider/coach").strip()
+    if not course_id or not new_value:
+        raise HTTPException(400, "course_id and new_value required")
+    rid = exec_sql(
+        "INSERT INTO change_requests(course_id,field,old_value,new_value,requested_by,status,created_at) VALUES(?,?,?,?,?,?,?)",
+        (course_id, field, data.get("old_value", ""), new_value, requested_by, "pending", now()),
+    )
+    return {"ok": True, "request": one("SELECT * FROM change_requests WHERE id=?", (rid,))}
+
+
+@app.post("/api/change-requests/{request_id}/{action}")
+def decide_change_request(request_id: int, action: str) -> dict[str, Any]:
+    if action not in {"approve", "reject"}:
+        raise HTTPException(400, "action must be approve or reject")
+    status = "approved" if action == "approve" else "rejected"
+    exec_sql("UPDATE change_requests SET status=? WHERE id=?", (status, request_id))
+    return {"ok": True, "status": status}
+
+
+@app.post("/api/documents")
+async def upload_document(
+    course_id: int = Form(...),
+    doc_type: str = Form("course document"),
+    access: str = Form("admin"),
+    note: str = Form(""),
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    if not one("SELECT id FROM courses WHERE id=?", (course_id,)):
+        raise HTTPException(404, "course not found")
+    safe_name = Path(file.filename or "upload.bin").name.replace(" ", "_")
+    stored = f"{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{safe_name}"
+    dest = UPLOAD_DIR / stored
+    with dest.open("wb") as f:
+        shutil.copyfileobj(file.file, f)
+    doc_id = exec_sql(
+        """INSERT INTO documents(course_id,filename,original_name,doc_type,access,status,note,uploaded_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (course_id, stored, file.filename or safe_name, doc_type, access, "uploaded", note, now()),
+    )
+    return {"ok": True, "document": one("SELECT * FROM documents WHERE id=?", (doc_id,))}
+
+
+@app.delete("/api/documents/{doc_id}")
+def delete_document(doc_id: int) -> dict[str, Any]:
+    doc = one("SELECT * FROM documents WHERE id=?", (doc_id,))
+    if not doc:
+        raise HTTPException(404, "document not found")
+    path = UPLOAD_DIR / doc["filename"]
+    if path.exists():
+        path.unlink()
+    exec_sql("DELETE FROM documents WHERE id=?", (doc_id,))
+    return {"ok": True}
+
+
+@app.get("/api/export/profile/{profile_id}")
+def export_profile(profile_id: int) -> dict[str, Any]:
+    p = one(
+        """SELECT sp.*, c.name AS course_name, c.provider, COALESCE(s.name,c.provider) AS school_name
+           FROM search_profiles sp JOIN courses c ON c.id=sp.course_id
+           LEFT JOIN schools s ON s.id=c.school_id WHERE sp.id=?""",
+        (profile_id,),
+    )
+    if not p:
+        raise HTTPException(404, "profile not found")
+    return {
+        "school": p["school_name"],
+        "course": p["course_name"],
+        "access": p["access_mode"],
+        "target_professions": [x for x in p["target_titles"].splitlines() if x.strip()],
+        "keywords_skills": [x.strip() for x in p["skills"].split(",") if x.strip()],
+        "location_rules": p["location_rules"],
+        "language_rules": p["language_rules"],
+        "exclude_titles": [x.strip() for x in p["exclude_titles"].split(",") if x.strip()],
+        "source_queries": [x for x in p["source_queries"].splitlines() if x.strip()],
+        "coach_note": p["coach_note"],
+    }
+
+
+
+def school_report_data(school_id: int) -> dict[str, Any]:
+    init_db()
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    courses = rows("SELECT * FROM courses WHERE school_id=? ORDER BY CASE status WHEN 'archived' THEN 1 ELSE 0 END, name", (school_id,))
+    leads = rows(
+        """SELECT l.*, c.name AS course_name FROM leads l
+           LEFT JOIN courses c ON c.id=l.course_id WHERE c.school_id=?
+           ORDER BY l.score DESC, l.updated_at DESC""",
+        (school_id,),
+    )
+    documents = rows(
+        """SELECT d.*, c.name AS course_name FROM documents d
+           LEFT JOIN courses c ON c.id=d.course_id WHERE c.school_id=?
+           ORDER BY d.uploaded_at DESC""",
+        (school_id,),
+    )
+    profiles = rows(
+        """SELECT sp.*, c.name AS course_name FROM search_profiles sp
+           JOIN courses c ON c.id=sp.course_id WHERE c.school_id=?
+           ORDER BY c.name""",
+        (school_id,),
+    )
+    changes = rows(
+        """SELECT cr.*, c.name AS course_name FROM change_requests cr
+           LEFT JOIN courses c ON c.id=cr.course_id WHERE c.school_id=?
+           ORDER BY cr.created_at DESC""",
+        (school_id,),
+    )
+    active_courses = [c for c in courses if c["status"] != "archived"]
+    avg_score = round(sum(int(l["score"] or 0) for l in leads) / len(leads), 1) if leads else 0
+    stats = {
+        "active_courses": len(active_courses),
+        "total_courses": len(courses),
+        "search_profiles": len(profiles),
+        "leads": len(leads),
+        "documents": len(documents),
+        "pending_changes": len([c for c in changes if c["status"] == "pending"]),
+        "avg_score": avg_score,
+    }
+    return {"school": school, "stats": stats, "courses": courses, "profiles": profiles, "leads": leads, "documents": documents, "change_requests": changes, "generated_at": now()}
+
+
+def safe_report_name(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name).strip("_") or "school"
+
+
+@app.get("/api/reports/school/{school_id}")
+def api_school_report(school_id: int) -> dict[str, Any]:
+    return school_report_data(school_id)
+
+
+@app.get("/download/school/{school_id}.json")
+def download_school_json(school_id: int) -> FileResponse:
+    data = school_report_data(school_id)
+    path = REPORT_DIR / f"{safe_report_name(data['school']['name'])}_report.json"
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return FileResponse(path, filename=path.name, media_type="application/json")
+
+
+@app.get("/download/school/{school_id}.csv")
+def download_school_csv(school_id: int) -> FileResponse:
+    data = school_report_data(school_id)
+    path = REPORT_DIR / f"{safe_report_name(data['school']['name'])}_courses_leads.csv"
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f, delimiter=";")
+        writer.writerow(["school", data["school"]["name"], "generated_at", data["generated_at"]])
+        writer.writerow([])
+        writer.writerow(["type", "course", "status", "score", "details"])
+        for c in data["courses"]:
+            writer.writerow(["course", c["name"], c["status"], c["fit_score"], f"funding={c['funding']} remote={c['remote']}"])
+        for l in data["leads"]:
+            writer.writerow(["lead", l["course_name"], l["status"], l["score"], l["title"]])
+        for d in data["documents"]:
+            writer.writerow(["document", d["course_name"], d["status"], "", d["original_name"]])
+    return FileResponse(path, filename=path.name, media_type="text/csv")
+
+
+@app.get("/download/school/{school_id}.html")
+def download_school_html(school_id: int) -> FileResponse:
+    data = school_report_data(school_id)
+    school = data["school"]
+    stats = data["stats"]
+
+    def e(v: Any) -> str:
+        return html.escape(str(v or ""))
+
+    course_rows = "".join(f"<tr><td>{e(c['name'])}</td><td>{e(c['funding'])}</td><td>{e(c['remote'])}</td><td>{e(c['status'])}</td><td>{e(c['fit_score'])}</td></tr>" for c in data["courses"])
+    lead_rows = "".join(f"<tr><td>{e(l['title'])}</td><td>{e(l['course_name'])}</td><td>{e(l['status'])}</td><td>{e(l['score'])}</td><td>{e(l['missing_evidence'])}</td></tr>" for l in data["leads"])
+    doc_rows = "".join(f"<tr><td>{e(d['original_name'])}</td><td>{e(d['course_name'])}</td><td>{e(d['doc_type'])}</td><td>{e(d['status'])}</td></tr>" for d in data["documents"])
+    profile_blocks = "".join(f"<section><h3>{e(p['course_name'])}</h3><p><b>Target professions:</b><br>{e(p['target_titles']).replace(chr(10), '<br>')}</p><p><b>Keywords/skills:</b><br>{e(p['skills'])}</p><p><b>Exclusions:</b><br>{e(p['exclude_titles'])}</p><p><b>Source queries:</b><br>{e(p['source_queries']).replace(chr(10), '<br>')}</p></section>" for p in data["profiles"])
+    body = f"""<!doctype html><html><head><meta charset='utf-8'><title>JobRadar Report - {e(school['name'])}</title><style>body{{font-family:Arial,sans-serif;margin:32px;color:#172033}}h1{{margin-bottom:0}}.muted{{color:#667}}.kpis{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0}}.kpi{{border:1px solid #ccd;padding:12px;border-radius:10px}}table{{width:100%;border-collapse:collapse;margin:14px 0}}td,th{{border:1px solid #ddd;padding:8px;text-align:left;vertical-align:top}}th{{background:#eef3ff}}section{{border:1px solid #ddd;border-radius:10px;padding:12px;margin:12px 0}}</style></head><body><h1>JobRadar School Report</h1><p class='muted'>{e(school['name'])} · generated {e(data['generated_at'])}</p><div class='kpis'><div class='kpi'><b>{stats['active_courses']}</b><br>Active courses</div><div class='kpi'><b>{stats['leads']}</b><br>Matched leads</div><div class='kpi'><b>{stats['documents']}</b><br>Documents</div><div class='kpi'><b>{stats['avg_score']}</b><br>Avg score</div></div><h2>Courses</h2><table><tr><th>Course</th><th>Funding</th><th>Remote</th><th>Status</th><th>Fit</th></tr>{course_rows}</table><h2>Matched leads</h2><table><tr><th>Lead</th><th>Course</th><th>Status</th><th>Score</th><th>Missing evidence</th></tr>{lead_rows}</table><h2>Search profiles</h2>{profile_blocks}<h2>Documents</h2><table><tr><th>File</th><th>Course</th><th>Type</th><th>Status</th></tr>{doc_rows}</table></body></html>"""
+    path = REPORT_DIR / f"{safe_report_name(school['name'])}_report.html"
+    path.write_text(body, encoding="utf-8")
+    return FileResponse(path, filename=path.name, media_type="text/html")
+
+
+@app.get("/download/all-schools.csv")
+def download_all_schools_csv() -> FileResponse:
+    init_db()
+    stats = rows(
+        """
+        SELECT s.name AS school, s.status,
+               COUNT(DISTINCT CASE WHEN c.status<>'archived' THEN c.id END) AS active_courses,
+               COUNT(DISTINCT c.id) AS total_courses,
+               COUNT(DISTINCT l.id) AS leads,
+               COUNT(DISTINCT d.id) AS documents,
+               ROUND(COALESCE(AVG(l.score),0),1) AS avg_score
+        FROM schools s
+        LEFT JOIN courses c ON c.school_id=s.id
+        LEFT JOIN leads l ON l.course_id=c.id
+        LEFT JOIN documents d ON d.course_id=c.id
+        GROUP BY s.id, s.name, s.status
+        ORDER BY s.name
+        """
+    )
+    path = REPORT_DIR / "JobRadar_all_schools_stats.csv"
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=["school", "status", "active_courses", "total_courses", "leads", "documents", "avg_score"], delimiter=";")
+        writer.writeheader()
+        writer.writerows(stats)
+    return FileResponse(path, filename=path.name, media_type="text/csv")
+
+
+@app.get("/api/n8n/search-tasks")
+def n8n_search_tasks() -> dict[str, Any]:
+    """Read-only config endpoint for a single n8n test workflow.
+
+    n8n should call this first, then process one/few source_queries and POST results
+    back to /api/n8n/leads. This avoids duplicating all workflows.
+    """
+    init_db()
+    tasks = rows(
+        """
+        SELECT sp.id AS profile_id, sp.course_id, c.name AS course_name,
+               COALESCE(s.name,c.provider) AS school_name,
+               sp.target_titles, sp.skills, sp.location_rules, sp.language_rules,
+               sp.exclude_titles, sp.source_queries, sp.coach_note
+        FROM search_profiles sp
+        JOIN courses c ON c.id=sp.course_id
+        LEFT JOIN schools s ON s.id=c.school_id
+        WHERE sp.active=1 AND c.status<>'archived'
+        ORDER BY school_name, course_name
+        """
+    )
+    return {"ok": True, "mode": "test", "tasks": tasks, "count": len(tasks)}
+
+
+def ensure_n8n_metric_tables() -> None:
+    init_db()
+    with db() as con:
+        con.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS source_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              workflow_run_id INTEGER DEFAULT 0,
+              source_name TEXT NOT NULL,
+              source_type TEXT DEFAULT 'source',
+              status TEXT DEFAULT 'completed',
+              raw_items INTEGER DEFAULT 0,
+              normalized_items INTEGER DEFAULT 0,
+              duplicate_items INTEGER DEFAULT 0,
+              relevant_items INTEGER DEFAULT 0,
+              failed_items INTEGER DEFAULT 0,
+              success_rate REAL DEFAULT 100,
+              quality_score REAL DEFAULT 0,
+              risk_level TEXT DEFAULT 'low',
+              started_at TEXT NOT NULL,
+              finished_at TEXT NOT NULL,
+              error_message TEXT DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS cost_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              tool_name TEXT NOT NULL,
+              tool_type TEXT DEFAULT 'tool',
+              source_name TEXT DEFAULT '',
+              workflow_run_id INTEGER DEFAULT 0,
+              units REAL DEFAULT 0,
+              unit_type TEXT DEFAULT 'request',
+              unit_cost REAL DEFAULT 0,
+              estimated_cost REAL DEFAULT 0,
+              created_at TEXT NOT NULL
+            );
+            """
+        )
+        con.commit()
+
+
+def _as_items(data: dict[str, Any]) -> list[dict[str, Any]]:
+    items = data.get("items")
+    if items is None:
+        items = [data]
+    if not isinstance(items, list):
+        raise HTTPException(400, "items must be a list")
+    return [item for item in items if isinstance(item, dict)]
+
+
+@app.get("/api/n8n/status")
+def n8n_status() -> dict[str, Any]:
+    ensure_n8n_metric_tables()
+    summary = one(
+        """
+        SELECT
+          (SELECT COUNT(*) FROM workflow_runs) workflow_runs,
+          (SELECT COUNT(*) FROM source_runs) source_runs,
+          (SELECT COUNT(*) FROM cost_events) cost_events,
+          (SELECT COUNT(*) FROM leads) leads
+        """
+    ) or {}
+    latest = rows("SELECT * FROM workflow_runs ORDER BY created_at DESC LIMIT 5")
+    return {"ok": True, "summary": summary, "latest_runs": latest}
+
+
+@app.post("/api/n8n/workflow-runs")
+async def n8n_workflow_runs(request: Request) -> dict[str, Any]:
+    ensure_n8n_metric_tables()
+    data = await request.json()
+    run_id = exec_sql(
+        "INSERT INTO workflow_runs(workflow_name,run_mode,status,input_count,output_count,note,created_at) VALUES(?,?,?,?,?,?,?)",
+        (
+            (data.get("workflow_name") or "JobRadar n8n workflow").strip(),
+            (data.get("run_mode") or "test").strip(),
+            (data.get("status") or "completed").strip(),
+            int(data.get("input_count") or 0),
+            int(data.get("output_count") or 0),
+            (data.get("note") or "Imported from n8n.").strip(),
+            data.get("created_at") or now(),
+        ),
+    )
+    return {"ok": True, "run_id": run_id}
+
+
+@app.post("/api/n8n/source-runs")
+async def n8n_source_runs(request: Request) -> dict[str, Any]:
+    ensure_n8n_metric_tables()
+    data = await request.json()
+    inserted = 0
+    for item in _as_items(data):
+        source_name = (item.get("source_name") or item.get("source") or "n8n source").strip()
+        if not source_name:
+            continue
+        raw_items = int(item.get("raw_items") or item.get("raw") or 0)
+        relevant_items = int(item.get("relevant_items") or item.get("relevant") or 0)
+        failed_items = int(item.get("failed_items") or item.get("failed") or 0)
+        success_rate = float(item.get("success_rate") or (100 if failed_items == 0 else max(0, 100 - failed_items * 10)))
+        exec_sql(
+            """INSERT INTO source_runs(workflow_run_id,source_name,source_type,status,raw_items,normalized_items,duplicate_items,relevant_items,failed_items,success_rate,quality_score,risk_level,started_at,finished_at,error_message)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(item.get("workflow_run_id") or data.get("workflow_run_id") or 0),
+                source_name,
+                (item.get("source_type") or "job_source").strip(),
+                (item.get("status") or "completed").strip(),
+                raw_items,
+                int(item.get("normalized_items") or item.get("normalized") or raw_items),
+                int(item.get("duplicate_items") or item.get("duplicates") or 0),
+                relevant_items,
+                failed_items,
+                success_rate,
+                float(item.get("quality_score") or item.get("quality") or 0),
+                (item.get("risk_level") or "low").strip(),
+                item.get("started_at") or now(),
+                item.get("finished_at") or now(),
+                (item.get("error_message") or "").strip(),
+            ),
+        )
+        inserted += 1
+    return {"ok": True, "inserted": inserted}
+
+
+@app.post("/api/n8n/cost-events")
+async def n8n_cost_events(request: Request) -> dict[str, Any]:
+    ensure_n8n_metric_tables()
+    data = await request.json()
+    inserted = 0
+    total_cost = 0.0
+    for item in _as_items(data):
+        tool_name = (item.get("tool_name") or item.get("tool") or "n8n tool").strip()
+        if not tool_name:
+            continue
+        units = float(item.get("units") or 0)
+        unit_cost = float(item.get("unit_cost") or 0)
+        estimated_cost = float(item.get("estimated_cost") or item.get("cost") or (units * unit_cost))
+        exec_sql(
+            "INSERT INTO cost_events(tool_name,tool_type,source_name,workflow_run_id,units,unit_type,unit_cost,estimated_cost,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                tool_name,
+                (item.get("tool_type") or "api").strip(),
+                (item.get("source_name") or item.get("source") or "").strip(),
+                int(item.get("workflow_run_id") or data.get("workflow_run_id") or 0),
+                units,
+                (item.get("unit_type") or "request").strip(),
+                unit_cost,
+                estimated_cost,
+                item.get("created_at") or now(),
+            ),
+        )
+        inserted += 1
+        total_cost += estimated_cost
+    return {"ok": True, "inserted": inserted, "estimated_cost": round(total_cost, 6)}
+
+
+@app.post("/api/n8n/leads")
+async def n8n_ingest_leads(request: Request) -> dict[str, Any]:
+    """Ingest normalized test leads from one n8n workflow.
+
+    Expected payload:
+    {"workflow_name":"JobRadar Test", "items":[{"course_id":1,"title":"...","provider":"...","status":"Candidate","score":80,"source_url":"...","why_fit":"..."}]}
+    """
+    data = await request.json()
+    workflow_name = (data.get("workflow_name") or "JobRadar n8n test workflow").strip()
+    items = data.get("items") or []
+    if not isinstance(items, list):
+        raise HTTPException(400, "items must be a list")
+    inserted = 0
+    skipped = 0
+    for item in items:
+        course_id = int(item.get("course_id") or 0)
+        title = (item.get("title") or "").strip()
+        if not course_id or not title or not one("SELECT id FROM courses WHERE id=?", (course_id,)):
+            skipped += 1
+            continue
+        provider = (item.get("provider") or item.get("company") or "n8n test source").strip()
+        status = (item.get("status") or "Candidate").strip()
+        score = int(item.get("score") or 0)
+        source_url = (item.get("source_url") or item.get("url") or "").strip()
+        why_fit = (item.get("why_fit") or item.get("summary") or "Imported from n8n test workflow.").strip()
+        missing = (item.get("missing_evidence") or "Needs human QA/citation check.").strip()
+        risks = (item.get("risks") or "Test import; verify before client report.").strip()
+        exec_sql(
+            """INSERT INTO leads(course_id,title,provider,status,score,cost,why_fit,missing_evidence,risks,sources,email_draft,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (course_id, title, provider, status, score, "n8n", why_fit, missing, risks, source_url, "", now()),
+        )
+        inserted += 1
+    run_id = exec_sql(
+        "INSERT INTO workflow_runs(workflow_name,run_mode,status,input_count,output_count,note,created_at) VALUES(?,?,?,?,?,?,?)",
+        (workflow_name, data.get("run_mode", "test"), "completed", len(items), inserted, f"skipped={skipped}", now()),
+    )
+    return {"ok": True, "inserted": inserted, "skipped": skipped, "run_id": run_id}
+
+
+@app.get("/api/n8n/runs")
+def n8n_runs() -> dict[str, Any]:
+    init_db()
+    return {"ok": True, "runs": rows("SELECT * FROM workflow_runs ORDER BY created_at DESC LIMIT 50")}
+
+
+@app.get("/download/db")
+def download_db() -> FileResponse:
+    init_db()
+    return FileResponse(DB_PATH, filename="jobradar.sqlite3")
+
+
+from ceo_metrics import register_ceo_routes
+register_ceo_routes(app, DB_PATH, REPORT_DIR, init_db)
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_react_app(full_path: str):
+    """Serve React SPA routes after all API/download routes are registered.
+
+    API, download, uploads and OpenAPI paths intentionally stay backend-owned.
+    """
+    backend_prefixes = ("api/", "download/", "uploads/", "docs", "redoc", "openapi.json")
+    if full_path.startswith(backend_prefixes):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return FileResponse(react_index)
+
+    raise HTTPException(status_code=404, detail="Frontend build not found. Run sync_frontend_from_react.bat first.")
