@@ -105,6 +105,7 @@ export default function ReferencesPage() {
         </div>
       </header>
 
+      <main id="main-content" role="main">
       {/* HERO */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 grid-bg opacity-60" />
@@ -264,6 +265,7 @@ export default function ReferencesPage() {
           </div>
         </div>
       </PageSection>
+      </main>
 
       <PublicFooter />
     </div>

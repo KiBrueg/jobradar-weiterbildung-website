@@ -134,6 +134,7 @@ export default function LandingPage() {
         </div>
       </header>
 
+      <main id="main-content" role="main">
       {/* Hero */}
       <section className="relative overflow-hidden">
         {/* Subtle background — Hermes-style: faint imagery visible at an angle */}
@@ -384,6 +385,7 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      </main>
 
       <PublicFooter />
     </div>
