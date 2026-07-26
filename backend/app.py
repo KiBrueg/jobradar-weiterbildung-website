@@ -1093,7 +1093,7 @@ def qa_approve(match_id: str):
     return RedirectResponse("/qa", status_code=303)
 
 
-@app.post("/api/qa/{match_id}/reject", request_class=None, include_in_schema=False)
+@app.post("/api/qa/{match_id}/reject", include_in_schema=False)
 async def qa_reject(match_id: str, request: Request):
     form = await request.form()
     reason = form.get("reason", "other")
