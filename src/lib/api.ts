@@ -108,6 +108,6 @@ export async function getCeoDashboard(range: ApiTimeRange): Promise<BackendCeoDa
   return response.json();
 }
 
-export function ceoReportDownloadUrl(range: ApiTimeRange): string {
-  return `/download/ceo-report.json?range=${encodeURIComponent(range)}`;
+export function ceoReportDownloadUrl(range: ApiTimeRange, format: 'json' | 'xlsx' = 'json'): string {
+  return `/download/ceo-report.${format}?range=${encodeURIComponent(range)}`;
 }
