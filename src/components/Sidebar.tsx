@@ -31,7 +31,7 @@ export const sections: { key: SectionKey; label: string; icon: LucideIcon }[] = 
   { key: 'profiles', label: 'Suchprofile', icon: Search },
   { key: 'leads', label: 'Leads', icon: Radar },
   { key: 'documents', label: 'Dokumente', icon: FileText },
-  { key: 'changes', label: 'AEnderungsanfragen', icon: GitPullRequestArrow },
+  { key: 'changes', label: 'Change Requests', icon: GitPullRequestArrow },
   { key: 'reports', label: 'Reports / Export', icon: FileBarChart },
   { key: 'n8n', label: 'n8n Bridge', icon: Workflow },
   { key: 'settings', label: 'Einstellungen', icon: Settings },
