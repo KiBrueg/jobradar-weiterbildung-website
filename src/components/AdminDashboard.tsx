@@ -336,7 +336,6 @@ export default function AdminDashboard() {
                 <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Suchen..." className="input pl-9 py-2 w-48 lg:w-64" />
               </div>
-              <span className="badge bg-brand-50 text-brand-700 ring-1 ring-brand-200">Local MVP</span>
               <button onClick={() => onExport('Backup')} className="btn-secondary">
                 <Download className="h-4 w-4" /><span className="hidden sm:inline">Backup exportieren</span>
               </button>

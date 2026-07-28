@@ -6,55 +6,47 @@ import PublicFooter from '@/components/PublicFooter';
 const sections = [
   {
     title: 'Verantwortlicher',
-    body: 'Angaben folgen vor Veroeffentlichung.',
+    body: 'Kirill Brüggemann\nKollatzstraße 2\n14059 Berlin\nDeutschland\n\nE-Mail: kontakt@kibrueg.de\nWeb: kibrueg.de',
   },
   {
-    title: 'Hosting und Server-Logs',
-    body: 'Beim Betrieb koennen technisch notwendige Server-Logdaten verarbeitet werden, z. B. IP-Adresse, Zeitpunkt, abgerufene Seite und technische Fehlermeldungen. Diese dienen ausschliesslich dem Betrieb, der Sicherheit und der Fehleranalyse und werden nach begrenzter Zeit automatisch geloescht.',
+    title: 'Welche Daten werden verarbeitet?',
+    body: 'Im Rahmen des B2B-Pilotbetriebs werden folgende Daten verarbeitet:\n\n• Kontaktdaten von Bildungseinrichtungen (Name der Einrichtung, Kontakt-E-Mail)\n• Kurs- und Profilinformationen (Kursname, Themenfeld, Suchbegriffe)\n• Technische Server-Logs (IP-Adresse, Zeitstempel, aufgerufene Ressourcen, HTTP-Status)\n\nKeine Endnutzer-Daten, keine Teilnehmerdaten, kein Tracking.',
   },
   {
-    title: 'Kontaktaufnahme',
-    body: 'Wenn Kontaktfunktionen spaeter aktiviert werden, werden die eingegebenen Daten nur zur Bearbeitung der Anfrage genutzt. Eine Speicherung erfolgt nur, soweit und solange es fuer die Bearbeitung erforderlich ist.',
+    title: 'Zweck und Rechtsgrundlage der Verarbeitung',
+    body: 'Die Verarbeitung erfolgt ausschließlich zum Betrieb des JobRadar-Matching-Services:\n\n• Kontaktdaten: Zweck Vertragsanbahnung und -erfüllung — Rechtsgrundlage Art. 6 Abs. 1 lit. b DSGVO\n• Server-Logs: Zweck Betrieb, Sicherheit und Fehleranalyse — Rechtsgrundlage Art. 6 Abs. 1 lit. f DSGVO (berechtigtes Interesse)',
   },
   {
-    title: 'Rechtsgrundlagen der Verarbeitung',
-    body: 'Je nach Funktion kommen insbesondere Art. 6 Abs. 1 lit. b (Vertragserfuellung), lit. f (berechtigtes Interesse) oder lit. a (Einwilligung) DSGVO in Betracht. Finale Rechtsgrundlagen werden vor Veroeffentlichung geprueft.',
+    title: 'Hosting',
+    body: 'Der Dienst wird auf einem Virtual Private Server von Hetzner Online GmbH (Industriestr. 25, 91710 Gunzenhausen) gehostet. Der Serverstandort befindet sich in der EU (Deutschland). Mit Hetzner besteht ein Auftragsverarbeitungsvertrag gemäß Art. 28 DSGVO.',
+  },
+  {
+    title: 'KI-Verarbeitung (OpenRouter)',
+    body: 'Zur Analyse von Stellenausschreibungen wird OpenRouter Inc. (USA) als KI-Anbieter eingesetzt. Dabei werden ausschließlich öffentliche Stellenbeschreibungen übermittelt — keine personenbezogenen Daten von Kursteilnehmern oder Schulkontakten. Die Übertragung erfolgt verschlüsselt (TLS). Mit OpenRouter besteht eine Datenverarbeitungsvereinbarung.',
   },
   {
     title: 'Speicherdauer',
-    body: 'Personenbezogene Daten werden nur so lange gespeichert, wie es fuer den jeweiligen Zweck erforderlich ist oder gesetzliche Aufbewahrungsfristen dies vorschreiben. Danach werden sie geloescht oder anonymisiert.',
+    body: 'Server-Logs werden nach spätestens 30 Tagen automatisch gelöscht. Kontakt- und Kursprofile werden für die Dauer des Pilotprojekts gespeichert und auf Anfrage jederzeit gelöscht. Nach Beendigung der Geschäftsbeziehung werden personenbezogene Daten gelöscht, sofern keine gesetzlichen Aufbewahrungspflichten entgegenstehen.',
   },
   {
-    title: 'Empfaenger / Auftragsverarbeiter',
-    body: 'Angaben folgen vor Veroeffentlichung. Auftragsverarbeiter (z. B. Hosting-Provider) werden vor Produktivstart vertraglich nach Art. 28 DSGVO eingebunden.',
+    title: 'Cookies und Tracking',
+    body: 'Es werden keine Marketing-Cookies, kein Google Analytics, kein Meta Pixel und kein Drittanbieter-Tracking eingesetzt. Technisch notwendige Cookies (z. B. Session) können für den sicheren Betrieb erforderlich sein. Ein Cookie-Banner ist daher nicht vorgesehen.',
   },
   {
-    title: 'Betroffenenrechte',
-    body: 'Auskunft, Berichtigung, Loeschung, Einschraenkung, Widerspruch und Datenuebertragbarkeit werden vor Produktivstart sauber dokumentiert. Betroffene koennen sich jederzeit fuer ihre Rechte an den Verantwortlichen wenden.',
+    title: 'Übertragungssicherheit',
+    body: "Alle Verbindungen werden über TLS (HTTPS) verschlüsselt übertragen. Zertifikate werden automatisch über Let's Encrypt ausgestellt und erneuert.",
   },
   {
-    title: 'Beschwerderecht bei einer Aufsichtsbehoerde',
-    body: 'Betroffene haben das Recht, sich bei einer zustaendigen Datenschutz-Aufsichtsbehoerde zu beschweren. Die zustaendige Stelle wird vor Veroeffentlichung ergaenzt.',
+    title: 'Ihre Rechte als Betroffene Person',
+    body: 'Sie haben das Recht auf:\n• Auskunft über gespeicherte Daten (Art. 15 DSGVO)\n• Berichtigung unrichtiger Daten (Art. 16 DSGVO)\n• Löschung (Art. 17 DSGVO)\n• Einschränkung der Verarbeitung (Art. 18 DSGVO)\n• Datenübertragbarkeit (Art. 20 DSGVO)\n• Widerspruch gegen die Verarbeitung (Art. 21 DSGVO)\n\nZur Ausübung dieser Rechte wenden Sie sich an: kontakt@kibrueg.de',
   },
   {
-    title: 'Cookies',
-    body: 'Derzeit werden keine nicht notwendigen Cookies gesetzt. Ein Cookie-Banner ist daher im aktuellen Stand nicht vorgesehen. Technisch notwendige Cookies koennen fuer Betrieb und Sicherheit erforderlich sein.',
+    title: 'Beschwerderecht bei einer Aufsichtsbehörde',
+    body: 'Sie haben das Recht, sich bei der zuständigen Datenschutz-Aufsichtsbehörde zu beschweren:\n\nBerliner Beauftragte für Datenschutz und Informationsfreiheit\nMajakowskiring 14–16, 13156 Berlin\nTelefon: +49 30 13889-0\nE-Mail: mailbox@datenschutz-berlin.de\nWeb: datenschutz-berlin.de',
   },
   {
-    title: 'Tracking / Analytics',
-    body: 'Aktuell sind keine Marketing-Cookies, kein Google Analytics, kein Meta Pixel und kein Drittanbieter-Tracking vorgesehen. Bei Aktivierung von Analyse-, Marketing- oder Drittanbieter-Cookies wird vorab ein Consent-Mechanismus ergaenzt.',
-  },
-  {
-    title: 'Drittanbieter-Dienste',
-    body: 'Drittanbieter-Dienste werden erst nach finaler Pruefung ergaenzt. Aktuell werden keine externen Widgets, Karten, Videos oder Chat-Tools eingebunden.',
-  },
-  {
-    title: 'Sicherheit / TLS',
-    body: 'Die Uebertragung erfolgt verschluesselt (TLS). Weitere technische und organisatorische Massnahmen werden vor Produktivstart dokumentiert.',
-  },
-  {
-    title: 'Aenderungen dieser Datenschutzerklaerung',
-    body: 'Diese Datenschutzerklaerung kann angepasst werden, um gesetzliche oder technische Aenderungen abzubilden. Die jeweils aktuelle Version ist auf dieser Seite abrufbar.',
+    title: 'Änderungen dieser Datenschutzerklärung',
+    body: 'Diese Datenschutzerklärung wird bei wesentlichen Änderungen am Dienst oder der Rechtslage aktualisiert. Die jeweils aktuelle Fassung ist auf dieser Seite abrufbar. Stand: Juli 2026.',
   },
 ];
 
@@ -65,7 +57,7 @@ export default function DatenschutzPage() {
       <main id="main-content" className="mx-auto max-w-4xl px-5 sm:px-8 py-12 md:py-16">
         <button onClick={goLanding} className="btn-ghost mb-8">
           <ArrowLeft className="h-4 w-4" />
-          Zurueck zur Uebersicht
+          Zurück zur Übersicht
         </button>
 
         <section className="card p-7 md:p-10">
@@ -75,27 +67,18 @@ export default function DatenschutzPage() {
             </span>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-brand-700">DSGVO / Datenschutz</p>
-              <h1 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Datenschutzerklaerung</h1>
+              <h1 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Datenschutzerklärung</h1>
             </div>
-          </div>
-
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 mb-8">
-            Diese Datenschutzerklaerung ist ein Arbeitsstand und ersetzt keine finale rechtliche Pruefung. Vor Veroeffentlichung muessen Verantwortlicher, Hosting, Kontaktwege und konkrete Verarbeitungsvorgaenge final ergaenzt werden.
           </div>
 
           <div className="grid gap-4">
             {sections.map((s) => (
               <section key={s.title} className="rounded-2xl border border-ink-200 bg-white p-5">
                 <h2 className="font-display text-lg font-semibold text-ink-900">{s.title}</h2>
-                <p className="mt-2 text-sm leading-relaxed text-ink-600">{s.body}</p>
+                <p className="mt-2 text-sm leading-relaxed text-ink-600 whitespace-pre-line">{s.body}</p>
               </section>
             ))}
           </div>
-
-          <section className="mt-8 rounded-2xl border border-accent-200 bg-accent-50/60 p-5">
-            <h2 className="font-display text-lg font-semibold text-ink-900">Privacy-friendly Default</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-700">JobRadar soll standardmaessig ohne Marketing-Tracking, ohne externe Werbe-Pixel und ohne unnoetige Drittanbieter-Widgets funktionieren. Ein Cookie-Banner ist nur erforderlich, wenn nicht notwendige Cookies oder Tracking spaeter aktiviert werden.</p>
-          </section>
         </section>
       </main>
       <PublicFooter />
