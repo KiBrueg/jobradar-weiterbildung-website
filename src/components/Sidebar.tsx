@@ -12,7 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { goLanding } from '@/App';
+import { goLanding, goImpressum, goDatenschutz } from '@/App';
 
 export type SectionKey =
   | 'overview'
@@ -90,10 +90,14 @@ export default function Sidebar({
             );
           })}
         </nav>
-        <div className="px-4 py-4 border-t border-ink-200">
+        <div className="px-4 py-4 border-t border-ink-200 space-y-2">
           <div className="rounded-xl bg-ink-50 p-3">
             <p className="text-xs font-semibold text-ink-700">Local MVP</p>
             <p className="mt-1 text-xs text-ink-500 leading-relaxed">React + FastAPI verbunden. CEO-KPIs laden live aus der lokalen API.</p>
+          </div>
+          <div className="flex gap-3 px-1">
+            <button onClick={goImpressum} className="text-xs text-ink-400 hover:text-ink-700 transition-colors">Impressum</button>
+            <button onClick={goDatenschutz} className="text-xs text-ink-400 hover:text-ink-700 transition-colors">Datenschutz</button>
           </div>
         </div>
       </aside>
