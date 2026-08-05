@@ -17,7 +17,7 @@ import {
   Sparkles,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goReferenzen } from '@/App';
+import { goAdmin, goKontakt, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 
@@ -374,7 +374,7 @@ export default function LandingPage() {
             Wenn Sie JobRadar Weiterbildung testen moechten, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <button onClick={() => toast('Pilot angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>

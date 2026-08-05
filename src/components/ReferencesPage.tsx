@@ -11,7 +11,7 @@ import {
   ClipboardCheck,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goLanding, goReferenzen } from '@/App';
+import { goAdmin, goKontakt, goLanding, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
@@ -136,7 +136,7 @@ export default function ReferencesPage() {
               JobRadar Weiterbildung befindet sich in der Pilotphase. Diese Seite ist vorbereitet, um spaeter echte Kundenstimmen, Google-Bewertungen oder Projekt-Feedback sauber und nachvollziehbar einzubinden.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <button onClick={() => toast('Pilotgespraech angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+              <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
                 Pilotgespraech anfragen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
@@ -257,7 +257,7 @@ export default function ReferencesPage() {
             Wenn Sie JobRadar Weiterbildung testen moechten, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <button onClick={() => toast('Pilot angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
