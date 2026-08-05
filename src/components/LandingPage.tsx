@@ -16,17 +16,18 @@ import {
   Building2,
   Sparkles,
   Quote,
+  PlayCircle,
 } from 'lucide-react';
 import { goAdmin, goKontakt, goReferenzen } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 
 const navItems = [
+  { label: 'Demo', href: '#demo', action: 'scroll' as const },
   { label: 'Loesung', href: '#loesung', action: 'scroll' as const },
   { label: 'Fuer Bildungstraeger', href: '#bildungstraeger', action: 'scroll' as const },
   { label: 'Ablauf', href: '#ablauf', action: 'scroll' as const },
   { label: 'Referenzen', href: '', action: 'referenzen' as const },
-  { label: 'Admin Demo', href: '#preview', action: 'scroll' as const },
 ];
 
 const problems = [
@@ -178,6 +179,57 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Demo Video */}
+      <section id="demo" className="relative mx-auto max-w-7xl px-5 sm:px-8 py-20">
+        <div className="text-center max-w-2xl mx-auto mb-10">
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">JobRadar in 90 Sekunden</h2>
+          <p className="mt-3 text-ink-600 leading-relaxed">
+            Sehen Sie, wie Weiterbildungstraeger aus Kursprofilen gepruefte Arbeitsmarkt-Matches,
+            Jobcenter-taugliche Reports und konkrete Coaching-Ansaetze erhalten.
+          </p>
+        </div>
+        <div className="max-w-4xl mx-auto">
+          <div className="card p-2 shadow-lift animate-fade-up">
+            <div className="relative rounded-xl bg-ink-900 aspect-video flex items-center justify-center overflow-hidden">
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.15) 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+              <div className="relative text-center px-6">
+                <button
+                  onClick={() => goKontakt()}
+                  className="flex flex-col items-center gap-4 group"
+                  aria-label="Pilot-Demo anfragen"
+                >
+                  <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 group-hover:bg-white/20 transition-colors">
+                    <PlayCircle className="h-10 w-10 text-white" />
+                  </span>
+                  <span className="text-white font-semibold text-base">Demo-Video folgt</span>
+                  <span className="text-white/60 text-sm">Persoenliche Live-Demo auf Anfrage verfuegbar</span>
+                </button>
+              </div>
+              <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
+                  <Radar className="h-4 w-4 text-white" />
+                </span>
+                <span className="text-white/60 text-xs font-medium">JobRadar Weiterbildung</span>
+              </div>
+              <div className="absolute top-4 right-4">
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70 font-medium ring-1 ring-white/20">
+                  ca. 90 Sek.
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
+              Pilot anfragen
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            <button onClick={() => toast('Beispiel-Report wird auf Anfrage bereitgestellt.', 'info')} className="btn-secondary text-base px-5 py-3">
+              Beispielreport ansehen
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Problem / Solution */}
       <section id="loesung" className="relative mx-auto max-w-7xl px-5 sm:px-8 py-20">
         <div className="grid md:grid-cols-2 gap-6 lg:gap-8">
@@ -258,7 +310,7 @@ export default function LandingPage() {
       {/* Product preview */}
       <section id="preview" className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Admin Dashboard</h2>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Admin Dashboard <span className="text-ink-400 font-normal text-xl">(in Entwicklung)</span></h2>
           <p className="mt-3 text-ink-600">KPIs, Schulen, Kurse, Suchprofile und Leads — uebersichtlich in einem Tool.</p>
         </div>
         {/* Browser frame mockup */}

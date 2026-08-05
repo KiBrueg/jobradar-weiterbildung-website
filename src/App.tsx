@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import LandingPage from '@/components/LandingPage';
 import AdminDashboard from '@/components/AdminDashboard';
+import AdminGate from '@/components/AdminGate';
 import ReferencesPage from '@/components/ReferencesPage';
 import ImpressumPage from '@/components/ImpressumPage';
 import DatenschutzPage from '@/components/DatenschutzPage';
@@ -73,7 +74,7 @@ export default function App() {
     <ToastProvider>
       <a href="#main-content" className="skip-link">Zum Hauptinhalt springen</a>
       {route === 'admin' ? (
-        <AdminDashboard />
+        <AdminGate><AdminDashboard /></AdminGate>
       ) : route === 'referenzen' ? (
         <ReferencesPage />
       ) : route === 'impressum' ? (
