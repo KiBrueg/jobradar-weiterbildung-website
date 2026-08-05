@@ -2,7 +2,7 @@ import { Radar } from 'lucide-react';
 import {
   goLanding,
   goReferenzen,
-  goAdmin,
+  goSchool,
   goImpressum,
   goDatenschutz,
   goBarrierefreiheit,
@@ -12,7 +12,7 @@ import {
 const links = [
   { label: 'Uebersicht', action: goLanding, path: '/' },
   { label: 'Referenzen', action: goReferenzen, path: '/referenzen' },
-  { label: 'Admin Demo', action: goAdmin, path: '/admin' },
+  { label: 'Schulportal', action: goSchool, path: '/school' },
   { label: 'Impressum', action: goImpressum, path: '/impressum' },
   { label: 'Datenschutz', action: goDatenschutz, path: '/datenschutz' },
   { label: 'Barrierefreiheit', action: goBarrierefreiheit, path: '/barrierefreiheit' },

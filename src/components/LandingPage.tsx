@@ -18,7 +18,7 @@ import {
   Quote,
   PlayCircle,
 } from 'lucide-react';
-import { goAdmin, goKontakt, goReferenzen } from '@/App';
+import { goKontakt, goReferenzen, goSchool } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 
@@ -108,8 +108,8 @@ export default function LandingPage() {
               ))}
             </nav>
             <div className="flex items-center gap-2">
-              <button onClick={() => goAdmin()} className="btn-primary">
-                Admin oeffnen
+              <button onClick={() => goSchool()} className="btn-primary">
+                Schulportal
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
@@ -164,8 +164,8 @@ export default function LandingPage() {
               JobRadar verbindet Kursprofile mit realistischen Zielberufen, passenden Stellen und woechentlichen Reports — damit Coaches mehr Zeit fuer Beratung haben.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <button onClick={() => goAdmin()} className="btn-primary text-base px-5 py-3">
-                Admin Demo oeffnen
+              <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
+                Schulportal ansehen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
               <button onClick={() => toast('Beispiel-Report wird vorbereitet.', 'info')} className="btn-secondary text-base px-5 py-3">
@@ -310,8 +310,8 @@ export default function LandingPage() {
       {/* Product preview */}
       <section id="preview" className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Admin Dashboard <span className="text-ink-400 font-normal text-xl">(in Entwicklung)</span></h2>
-          <p className="mt-3 text-ink-600">KPIs, Schulen, Kurse, Suchprofile und Leads — uebersichtlich in einem Tool.</p>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Schulportal <span className="text-ink-400 font-normal text-xl">(Pilotansicht)</span></h2>
+          <p className="mt-3 text-ink-600">Kurse, freigegebene Matches, Reports und Tarif-Leistung — sichtbar fuer die jeweilige Schule.</p>
         </div>
         {/* Browser frame mockup */}
         <div className="card p-2 shadow-lift max-w-5xl mx-auto animate-fade-up">
@@ -319,7 +319,7 @@ export default function LandingPage() {
             <span className="h-3 w-3 rounded-full bg-rose-300" />
             <span className="h-3 w-3 rounded-full bg-amber-300" />
             <span className="h-3 w-3 rounded-full bg-accent-300" />
-            <span className="ml-3 text-xs text-ink-400 font-mono">jobradar.app/admin</span>
+            <span className="ml-3 text-xs text-ink-400 font-mono">kibrueg.de/school</span>
           </div>
           <div className="p-5 bg-white rounded-b-xl">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
@@ -357,8 +357,8 @@ export default function LandingPage() {
           </div>
         </div>
         <div className="text-center mt-8">
-          <button onClick={() => goAdmin()} className="btn-primary text-base px-5 py-3">
-            Live Demo oeffnen
+          <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
+            Schulportal oeffnen
             <ArrowRight className="h-4.5 w-4.5" />
           </button>
         </div>
@@ -430,8 +430,8 @@ export default function LandingPage() {
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
-            <button onClick={() => goAdmin()} className="btn-secondary text-base px-5 py-3">
-              Zur Admin Demo
+            <button onClick={() => goSchool()} className="btn-secondary text-base px-5 py-3">
+              Schulportal ansehen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
           </div>

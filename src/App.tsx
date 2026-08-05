@@ -7,18 +7,20 @@ import ImpressumPage from '@/components/ImpressumPage';
 import DatenschutzPage from '@/components/DatenschutzPage';
 import BarrierefreiheitPage from '@/components/BarrierefreiheitPage';
 import KontaktPage from '@/components/KontaktPage';
+import SchoolPortalPage from '@/components/SchoolPortalPage';
 import { ToastProvider } from '@/components/Toast';
 
-type Route = 'landing' | 'admin' | 'referenzen' | 'impressum' | 'datenschutz' | 'barrierefreiheit' | 'kontakt';
+type Route = 'landing' | 'admin' | 'referenzen' | 'impressum' | 'datenschutz' | 'barrierefreiheit' | 'kontakt' | 'school';
 
 function getRoute(): Route {
   const path = window.location.pathname.replace(/\/$/, '');
-  if (path === '/admin') return 'admin';
+  if (path === '/admin' && window.location.hostname.startsWith('admin.')) return 'admin';
   if (path === '/referenzen') return 'referenzen';
   if (path === '/impressum') return 'impressum';
   if (path === '/datenschutz') return 'datenschutz';
   if (path === '/barrierefreiheit') return 'barrierefreiheit';
   if (path === '/kontakt') return 'kontakt';
+  if (path === '/school') return 'school';
   return 'landing';
 }
 
@@ -31,6 +33,7 @@ function navigate(route: Route) {
     datenschutz: '/datenschutz',
     barrierefreiheit: '/barrierefreiheit',
     kontakt: '/kontakt',
+    school: '/school',
   };
   const url = paths[route];
   if (window.location.pathname !== url) {
@@ -60,6 +63,9 @@ export function goBarrierefreiheit() {
 export function goKontakt() {
   navigate('kontakt');
 }
+export function goSchool() {
+  navigate('school');
+}
 
 export default function App() {
   const [route, setRoute] = useState<Route>(getRoute());
@@ -85,6 +91,8 @@ export default function App() {
         <BarrierefreiheitPage />
       ) : route === 'kontakt' ? (
         <KontaktPage />
+      ) : route === 'school' ? (
+        <SchoolPortalPage />
       ) : (
         <LandingPage />
       )}

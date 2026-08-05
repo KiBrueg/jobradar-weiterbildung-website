@@ -11,7 +11,7 @@ import {
   ClipboardCheck,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goKontakt, goLanding, goReferenzen } from '@/App';
+import { goKontakt, goLanding, goReferenzen, goSchool } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
@@ -25,7 +25,7 @@ const navItems = [
   { label: 'Fuer Bildungstraeger', route: 'landing' as const },
   { label: 'Ablauf', route: 'landing' as const },
   { label: 'Referenzen', route: 'referenzen' as const },
-  { label: 'Admin Demo', route: 'admin' as const },
+  { label: 'Schulportal', route: 'school' as const },
 ];
 
 const categories = [
@@ -50,8 +50,8 @@ export default function ReferencesPage() {
   const navItem = (n: (typeof navItems)[number]) => {
     setMobileNav(false);
     if (n.route === 'landing') goLanding();
-    else if (n.route === 'admin') goAdmin();
     else if (n.route === 'referenzen') goReferenzen();
+    else if (n.route === 'school') goSchool();
   };
 
   return (
@@ -76,8 +76,8 @@ export default function ReferencesPage() {
               ))}
             </nav>
             <div className="flex items-center gap-2">
-              <button onClick={() => goAdmin()} className="btn-primary">
-                Admin oeffnen
+              <button onClick={() => goSchool()} className="btn-primary">
+                Schulportal
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
@@ -261,8 +261,8 @@ export default function ReferencesPage() {
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
-            <button onClick={() => goAdmin()} className="btn-secondary text-base px-5 py-3">
-              Zur Admin Demo
+            <button onClick={() => goSchool()} className="btn-secondary text-base px-5 py-3">
+              Schulportal ansehen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
           </div>

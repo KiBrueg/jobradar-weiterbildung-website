@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Radar, ArrowRight } from 'lucide-react';
-import { goLanding, goReferenzen, goAdmin } from '@/App';
+import { goLanding, goReferenzen, goSchool } from '@/App';
 
 const navItems = [
   { label: 'Loesung', route: 'landing' as const },
   { label: 'Fuer Bildungstraeger', route: 'landing' as const },
   { label: 'Ablauf', route: 'landing' as const },
   { label: 'Referenzen', route: 'referenzen' as const },
-  { label: 'Admin Demo', route: 'admin' as const },
+  { label: 'Schulportal', route: 'school' as const },
 ];
 
 function currentPath() {
@@ -21,14 +21,14 @@ export default function PublicHeader() {
   const routePath: Record<string, string> = {
     landing: '/',
     referenzen: '/referenzen',
-    admin: '/admin',
+    school: '/school',
   };
 
   const navItem = (n: (typeof navItems)[number]) => {
     setMobileNav(false);
     if (n.route === 'landing') goLanding();
-    else if (n.route === 'admin') goAdmin();
     else if (n.route === 'referenzen') goReferenzen();
+    else if (n.route === 'school') goSchool();
   };
 
   return (
@@ -56,8 +56,8 @@ export default function PublicHeader() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <button onClick={() => goAdmin()} className="btn-primary">
-              Admin oeffnen
+            <button onClick={() => goSchool()} className="btn-primary">
+              Schulportal
               <ArrowRight className="h-4 w-4" />
             </button>
             <button
