@@ -75,6 +75,7 @@ ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
 N8N_TOKEN = os.getenv("JOBRADAR_N8N_TOKEN", "")
 PUBLIC_BASE_URL = os.getenv("JOBRADAR_PUBLIC_BASE_URL", "https://kibrueg.de").rstrip("/")
 MANUAL_JOB_WEBHOOK = os.getenv("JOBRADAR_MANUAL_JOB_WEBHOOK", "")
+REGISTRATION_WEBHOOK = os.getenv("JOBRADAR_REGISTRATION_WEBHOOK", "")
 PROTECTED_PREFIXES = ("/admin", "/api", "/download", "/qa")
 N8N_PREFIX = "/api/n8n"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -309,6 +310,17 @@ def init_db() -> None:
               created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_notification_events_created ON notification_events(created_at);
+            CREATE TABLE IF NOT EXISTS school_registrations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              contact_person TEXT NOT NULL,
+              email TEXT NOT NULL,
+              plan TEXT DEFAULT 'pilot',
+              message TEXT DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              status TEXT NOT NULL DEFAULT 'pending'
+            );
+            CREATE INDEX IF NOT EXISTS idx_school_registrations_status ON school_registrations(status, created_at);
             """
         )
 
@@ -1327,7 +1339,7 @@ def admin_add_job_submit(
 
 
 def admin_nav() -> str:
-    return "<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>"
+    return "<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/registrations'>Anmeldungen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>"
 
 
 def status_options(current: Any) -> str:
@@ -1339,6 +1351,154 @@ def status_options(current: Any) -> str:
 def admin_style() -> str:
     return """<style>
 body{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}nav{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}nav a{color:#94a3b8;text-decoration:none;font-size:14px}nav a:hover{color:#fff}nav b{color:#fff}.wrap{max-width:1180px;margin:28px auto;padding:0 20px}.card{background:#fff;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}.mini{border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:16px 0;background:#fbfdff}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:600;color:#334155}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font:inherit;margin-top:5px}textarea{resize:vertical}.actions{text-align:right;align-self:end}button,.btn{background:#1e293b;color:#fff;border:none;border-radius:8px;padding:9px 14px;text-decoration:none;display:inline-block;cursor:pointer}.primary{background:#2563eb}.small{font-size:12px;padding:6px 10px}table{width:100%;border-collapse:collapse}th{background:#f1f5f9;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase;padding:9px}td{border-top:1px solid #eef2f7;padding:10px;font-size:14px;vertical-align:top}span,.muted{color:#64748b}.portalbox{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;margin-top:14px;word-break:break-all}.profile{margin-top:12px;border-top:1px dashed #cbd5e1;padding-top:12px}@media(max-width:800px){.grid2{grid-template-columns:1fr}.wide{grid-column:auto}}</style>"""
+
+
+def registration_status_badge(status: Any) -> str:
+    value = str(status or "pending")
+    colors = {"pending": "#f59e0b", "approved": "#16a34a", "rejected": "#64748b"}
+    color = colors.get(value, "#64748b")
+    return f"<span style='display:inline-block;border-radius:999px;background:{color};color:white;padding:3px 9px;font-size:12px;font-weight:700'>{e(value)}</span>"
+
+
+def _registration_notify(payload: dict[str, Any]) -> None:
+    """Best-effort notification for new school self-registrations."""
+    webhook = REGISTRATION_WEBHOOK or os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return
+    import urllib.request as _ur, json as _j
+    data = {
+        "event": "school_registration",
+        "to_email": "kontakt@kibrueg.de",
+        "subject": f"Neue JobRadar Schul-Anmeldung: {payload.get('name','')}",
+        **payload,
+    }
+    try:
+        req = _ur.Request(webhook, data=_j.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+    except Exception:
+        # Registration must never fail because the notification hook is unavailable.
+        pass
+
+
+@app.get("/register", response_class=HTMLResponse)
+def school_register_form(request: Request):
+    init_db()
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><title>Schule anmelden · JobRadar</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--brand:#2563eb;--bg:#f8fafc}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.hero{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:white;padding:44px 0}.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+.badge{display:inline-flex;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;color:#dbeafe;font-size:12px;font-weight:700}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:18px 0 12px;letter-spacing:-.04em}p{line-height:1.6}.muted{color:var(--muted)}
+.card{background:white;border:1px solid var(--line);border-radius:18px;padding:24px;margin:24px auto;box-shadow:0 12px 28px rgba(15,23,42,.06)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:700;color:#334155}
+input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #dbe3ef;border-radius:12px;padding:11px 12px;font:inherit;margin-top:6px;background:#fff}textarea{resize:vertical}
+button{background:#2563eb;color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:800;cursor:pointer}.note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px;color:#1e40af}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style></head><body><header class='hero'><div class='wrap'><span class='badge'>JobRadar · Schul-Anmeldung</span><h1>Arbeitsmarkt-Radar fuer Ihre Weiterbildung</h1><p>Reichen Sie Ihre Schule ein. Wir pruefen den Pilotzugang und melden uns innerhalb von 24 Stunden.</p></div></header>
+<main class='wrap'><section class='card'><h2>Schule anmelden</h2><p class='muted'>Keine Teilnehmerdaten erforderlich. Wir benoetigen nur Kontaktdaten fuer die Pilot-Abstimmung.</p>
+<form method='post' action='/register' class='grid'>
+<label>Schulname<input name='name' required maxlength='160' autocomplete='organization'></label>
+<label>Ansprechpartner<input name='contact_person' required maxlength='160' autocomplete='name'></label>
+<label>E-Mail<input name='email' type='email' required maxlength='180' autocomplete='email'></label>
+<label>Plan<select name='plan'><option value='pilot'>Pilot</option><option value='basic'>Basic</option><option value='pro'>Pro</option></select></label>
+<label class='wide'>Nachricht<textarea name='message' rows='5' maxlength='2000' placeholder='Welche Kurse / Standorte / Zielrollen sind fuer Sie relevant?'></textarea></label>
+<div class='wide note'>Nach dem Absenden speichern wir die Anfrage intern und kontaktieren Sie unter der angegebenen E-Mail-Adresse.</div>
+<div class='wide' style='text-align:right'><button>Absenden</button></div>
+</form></section></main></body></html>""")
+
+
+@app.post("/register", response_class=HTMLResponse)
+def school_register_submit(
+    name: str = Form(...), contact_person: str = Form(...), email: str = Form(...),
+    plan: str = Form("pilot"), message: str = Form(""),
+):
+    init_db()
+    clean_name = name.strip()
+    clean_contact = contact_person.strip()
+    clean_email = email.strip().lower()
+    clean_plan = plan.strip().lower()
+    if clean_plan not in {"pilot", "basic", "pro"}:
+        clean_plan = "pilot"
+    if not clean_name or not clean_contact or "@" not in clean_email:
+        raise HTTPException(400, "valid school, contact person and email required")
+    reg_id = exec_sql(
+        """INSERT INTO school_registrations(name,contact_person,email,plan,message,created_at,status)
+           VALUES(?,?,?,?,?,?, 'pending')""",
+        (clean_name[:160], clean_contact[:160], clean_email[:180], clean_plan, message.strip()[:2000], now()),
+    )
+    _registration_notify({
+        "registration_id": reg_id,
+        "name": clean_name[:160],
+        "contact_person": clean_contact[:160],
+        "email": clean_email[:180],
+        "plan": clean_plan,
+        "message": message.strip()[:2000],
+        "admin_url": f"{PUBLIC_BASE_URL}/admin/registrations",
+    })
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Danke · JobRadar</title><style>body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#172033}.wrap{max-width:720px;margin:80px auto;padding:0 20px}.card{background:white;border:1px solid #dbe3ef;border-radius:18px;padding:32px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ok{display:inline-flex;background:#dcfce7;color:#166534;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}a{color:#2563eb}</style></head>
+<body><main class='wrap'><section class='card'><span class='ok'>Anfrage erhalten</span><h1>Vielen Dank.</h1><p>Wir melden uns innerhalb von 24 Stunden bei Ihnen.</p><p><a href='/'>Zurueck zur Startseite</a></p></section></main></body></html>""")
+
+
+@app.get("/admin/registrations", response_class=HTMLResponse)
+def admin_registrations_page(request: Request):
+    init_db()
+    registrations = rows("SELECT * FROM school_registrations ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, created_at DESC")
+    def row(r: dict[str, Any]) -> str:
+        actions = ""
+        if str(r.get("status") or "pending") == "pending":
+            actions = (
+                f"<form method='post' action='/admin/registrations/{r['id']}/approve' style='display:inline'><button class='primary small'>Schule anlegen</button></form> "
+                f"<form method='post' action='/admin/registrations/{r['id']}/reject' style='display:inline'><button class='small' style='background:#64748b'>Ablehnen</button></form>"
+            )
+        else:
+            actions = "<span class='muted'>abgeschlossen</span>"
+        return (
+            f"<tr><td><b>{e(r['name'])}</b><br><span>{e(r.get('created_at',''))}</span></td>"
+            f"<td>{e(r['contact_person'])}<br><span>{e(r['email'])}</span></td>"
+            f"<td>{e(r.get('plan','pilot'))}</td><td>{registration_status_badge(r.get('status'))}</td>"
+            f"<td>{e(r.get('message',''))}</td><td>{actions}</td></tr>"
+        )
+    body = "".join(row(r) for r in registrations) or "<tr><td colspan='6'>Noch keine Anmeldungen.</td></tr>"
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><title>Schul-Anmeldungen</title>{admin_style()}</head><body>
+{admin_nav()}<main class='wrap'><h1>Schul-Anmeldungen</h1><p class='muted'>Anfragen aus der oeffentlichen /register-Form. Approve legt eine Schule als Lead an; Kurse/Suchprofile werden danach in der Schul-Detailseite gepflegt.</p>
+<section class='card'><table><thead><tr><th>Schule</th><th>Kontakt</th><th>Plan</th><th>Status</th><th>Nachricht</th><th>Aktion</th></tr></thead><tbody>{body}</tbody></table></section></main></body></html>"""
+    return HTMLResponse(html_doc)
+
+
+@app.post("/admin/registrations/{registration_id}/approve")
+def admin_registration_approve(registration_id: int):
+    init_db()
+    reg = one("SELECT * FROM school_registrations WHERE id=?", (registration_id,))
+    if not reg:
+        raise HTTPException(404, "registration not found")
+    if reg.get("status") == "approved":
+        existing = one("SELECT id FROM schools WHERE name=?", (reg["name"],))
+        return Response(status_code=303, headers={"Location": f"/admin/schools/{existing['id']}" if existing else "/admin/registrations"})
+    existing = one("SELECT id FROM schools WHERE name=?", (reg["name"].strip(),))
+    note = f"Registration #{registration_id}; Ansprechpartner: {reg['contact_person']}; Plan: {reg.get('plan') or 'pilot'}; Nachricht: {reg.get('message') or ''}"
+    if existing:
+        school_id = int(existing["id"])
+        exec_sql("UPDATE schools SET contact_email=COALESCE(NULLIF(contact_email,''),?), note=CASE WHEN COALESCE(note,'')='' THEN ? ELSE note END, updated_at=? WHERE id=?", (reg["email"], note[:1000], now(), school_id))
+    else:
+        school_id = exec_sql(
+            """INSERT INTO schools(name,website,contact_email,status,note,created_at,updated_at,portal_plan,portal_price_eur)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (reg["name"].strip(), "", reg["email"].strip(), "lead", note[:1000], now(), now(), f"{str(reg.get('plan') or 'pilot').title()} Portal", 49),
+        )
+    exec_sql("UPDATE school_registrations SET status='approved' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/registrations/{registration_id}/reject")
+def admin_registration_reject(registration_id: int):
+    init_db()
+    if not one("SELECT id FROM school_registrations WHERE id=?", (registration_id,)):
+        raise HTTPException(404, "registration not found")
+    exec_sql("UPDATE school_registrations SET status='rejected' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": "/admin/registrations"})
 
 
 @app.get("/admin/schools", response_class=HTMLResponse)
