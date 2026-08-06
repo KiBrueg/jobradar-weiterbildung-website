@@ -8,7 +8,6 @@ import {
   FileBarChart,
   GraduationCap,
   LockKeyhole,
-  Radar,
   School,
   ShieldCheck,
   Sparkles,
