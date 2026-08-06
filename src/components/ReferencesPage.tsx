@@ -12,7 +12,6 @@ import {
   Quote,
 } from 'lucide-react';
 import { goKontakt, goLanding, goReferenzen, goSchool } from '@/App';
-import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
 import FeedbackStatusCard from '@/components/references/FeedbackStatusCard';
@@ -44,7 +43,6 @@ const placeholders = [
 ];
 
 export default function ReferencesPage() {
-  const { toast } = useToast();
   const [mobileNav, setMobileNav] = useState(false);
 
   const navItem = (n: (typeof navItems)[number]) => {

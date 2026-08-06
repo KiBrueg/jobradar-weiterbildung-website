@@ -66,10 +66,17 @@ DB_PATH = BASE_DIR / "jobradar.sqlite3"
 UPLOAD_DIR = BASE_DIR / "uploads"
 REPORT_DIR = BASE_DIR / "reports"
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
+if not (FRONTEND_DIST / "index.html").exists() and (BASE_DIR.parent / "dist" / "index.html").exists():
+    FRONTEND_DIST = BASE_DIR.parent / "dist"
 FRONTEND_ASSETS = FRONTEND_DIST / "assets"
+
 ADMIN_USER = os.getenv("JOBRADAR_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
-PROTECTED_PREFIXES = ("/admin",)
+N8N_TOKEN = os.getenv("JOBRADAR_N8N_TOKEN", "")
+PUBLIC_BASE_URL = os.getenv("JOBRADAR_PUBLIC_BASE_URL", "https://kibrueg.de").rstrip("/")
+MANUAL_JOB_WEBHOOK = os.getenv("JOBRADAR_MANUAL_JOB_WEBHOOK", "")
+PROTECTED_PREFIXES = ("/admin", "/api", "/download", "/qa")
+N8N_PREFIX = "/api/n8n"
 UPLOAD_DIR.mkdir(exist_ok=True)
 REPORT_DIR.mkdir(exist_ok=True)
 
@@ -104,16 +111,35 @@ def _valid_basic_auth(header: str | None) -> bool:
     return secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASSWORD)
 
 
+def _valid_n8n_token(request: Request) -> bool:
+    """Allow n8n machine access without exposing admin Basic credentials."""
+    if not N8N_TOKEN:
+        return False
+    supplied = request.headers.get("x-jobradar-n8n-token", "")
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        supplied = auth.removeprefix("Bearer ")
+    return bool(supplied) and secrets.compare_digest(supplied, N8N_TOKEN)
+
+
+def _is_protected_path(path: str) -> bool:
+    return path.startswith(PROTECTED_PREFIXES)
+
+
 @app.middleware("http")
 async def optional_admin_basic_auth(request: Request, call_next):
-    """Protect admin/API/downloads when JOBRADAR_ADMIN_PASSWORD is configured.
+    """Protect internal admin/API/download surfaces in exposed deployments.
 
-    Local development remains passwordless by default; set
-    JOBRADAR_ADMIN_PASSWORD before exposing the MVP beyond localhost.
+    Local development remains passwordless by default. In production set
+    JOBRADAR_ADMIN_PASSWORD. n8n can use JOBRADAR_N8N_TOKEN for /api/n8n/*.
+    School portals remain separate tokenized /school/{token} read-only pages.
     """
-    if ADMIN_PASSWORD and request.url.path.startswith(PROTECTED_PREFIXES):
+    path = request.url.path
+    if ADMIN_PASSWORD and _is_protected_path(path):
+        if path.startswith(N8N_PREFIX) and _valid_n8n_token(request):
+            return await call_next(request)
         if not _valid_basic_auth(request.headers.get("authorization")):
-            is_ajax = "application/json" in request.headers.get("accept", "")
+            is_ajax = "application/json" in request.headers.get("accept", "") or path.startswith("/api")
             return _unauthorized(is_ajax=is_ajax)
     return await call_next(request)
 
@@ -272,9 +298,20 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_ja_lead ON job_assignments(lead_id);
             CREATE INDEX IF NOT EXISTS idx_ja_school ON job_assignments(school_id);
+            CREATE TABLE IF NOT EXISTS notification_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              event_type TEXT NOT NULL,
+              lead_id INTEGER DEFAULT 0,
+              school_id INTEGER DEFAULT 0,
+              to_email TEXT DEFAULT '',
+              status TEXT NOT NULL,
+              error TEXT DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_notification_events_created ON notification_events(created_at);
             """
         )
-        # Safe migration for older DB created before schools table.
+
         cols = table_columns(con, "courses")
         if "school_id" not in cols:
             con.execute("ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL")
@@ -447,6 +484,52 @@ def dashboard() -> dict[str, Any]:
             "pending_changes": len([r for r in requests if r["status"] == "pending"]),
         },
     }
+
+
+@app.get("/api/system/status")
+def system_status() -> dict[str, Any]:
+    init_db()
+    latest_notifications = rows(
+        """SELECT event_type,lead_id,school_id,to_email,status,error,created_at
+           FROM notification_events ORDER BY created_at DESC LIMIT 10"""
+    )
+    return {
+        "ok": True,
+        "admin_auth_configured": bool(ADMIN_PASSWORD),
+        "n8n_token_configured": bool(N8N_TOKEN),
+        "approve_notify_webhook_configured": bool(os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")),
+        "public_base_url": PUBLIC_BASE_URL,
+        "counts": one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM schools WHERE status<>'archived') AS schools,
+              (SELECT COUNT(*) FROM courses WHERE status<>'archived') AS courses,
+              (SELECT COUNT(*) FROM search_profiles WHERE active=1) AS active_profiles,
+              (SELECT COUNT(*) FROM leads) AS leads,
+              (SELECT COUNT(*) FROM notification_events) AS notification_events
+            """
+        ) or {},
+        "latest_notifications": latest_notifications,
+    }
+
+
+@app.post("/api/system/test-notification")
+def test_notification(body: dict | None = None) -> dict[str, Any]:
+    """Send a safe test payload through the configured approve webhook."""
+    init_db()
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return {"ok": False, "sent": 0, "reason": "webhook_not_configured"}
+    school_id = int((body or {}).get("school_id") or 0)
+    school = one("SELECT id,name,contact_email,portal_token FROM schools WHERE id=?", (school_id,)) if school_id else one("SELECT id,name,contact_email,portal_token FROM schools WHERE COALESCE(contact_email,'')<>'' ORDER BY id LIMIT 1")
+    if not school or not (school.get("contact_email") or "").strip():
+        return {"ok": False, "sent": 0, "reason": "school_email_not_configured"}
+    lead_id = int((body or {}).get("lead_id") or 0)
+    lead = one("SELECT id FROM leads WHERE id=?", (lead_id,)) if lead_id else one("SELECT id FROM leads ORDER BY score DESC LIMIT 1")
+    if not lead:
+        return {"ok": False, "sent": 0, "reason": "lead_not_found"}
+    sent = _notify_school_new_lead(int(lead["id"]), int(school["id"]), "JobRadar webhook test")
+    return {"ok": sent > 0, "sent": sent}
 
 
 @app.post("/api/schools")
@@ -901,19 +984,32 @@ def _similar_title_duplicates(lead_id: int, title: str) -> list:
 
 
 
-def _notify_school_new_lead(lead_id: int, school_id: int | None, note: str = "") -> bool:
-    """Best-effort notification hook for Sprint-1 pilot onboarding.
+def _record_notification(event_type: str, lead_id: int, school_id: int | None, email: str, status: str, error: str = "") -> None:
+    try:
+        exec_sql(
+            """INSERT INTO notification_events(event_type,lead_id,school_id,to_email,status,error,created_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (event_type, lead_id, int(school_id or 0), email, status, error[:500], now()),
+        )
+    except Exception:
+        pass
 
-    Sends a customer-safe payload to n8n if JOBRADAR_APPROVE_NOTIFY_WEBHOOK or
-    JOBRADAR_NOTIFY_WEBHOOK_URL is configured. No secrets/tokens are printed or
-    exposed in API responses. Missing webhook must not block approve.
+
+def _notify_school_new_lead(lead_id: int, school_id: int | None, note: str = "") -> int:
+    """Best-effort customer-safe notification hook for approved leads.
+
+    Sends to n8n if JOBRADAR_APPROVE_NOTIFY_WEBHOOK or JOBRADAR_NOTIFY_WEBHOOK_URL
+    is configured. No secrets/tokens are printed or exposed in API responses.
+    Missing webhook/contact emails must not block approve.
     """
     webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
     if not webhook:
-        return False
+        _record_notification("job_approved_for_school", lead_id, school_id, "", "skipped_no_webhook")
+        return 0
     lead = one("SELECT id,title,provider,score,why_fit,updated_at FROM leads WHERE id=?", (lead_id,))
     if not lead:
-        return False
+        _record_notification("job_approved_for_school", lead_id, school_id, "", "skipped_missing_lead")
+        return 0
     targets = []
     if school_id is None:
         targets = rows("""SELECT id,name,contact_email,portal_token
@@ -926,15 +1022,16 @@ def _notify_school_new_lead(lead_id: int, school_id: int | None, note: str = "")
                         WHERE id=? AND status<>'archived'""", (school_id,))
         if school:
             targets = [school]
-    sent = False
     import urllib.request as _ur, json as _j
+    sent_count = 0
     for school in targets:
         email = (school.get("contact_email") or "").strip()
         if not email:
+            _record_notification("job_approved_for_school", lead_id, school.get("id"), "", "skipped_no_email")
             continue
         portal_url = ""
         if school.get("portal_token"):
-            portal_url = "https://kibrueg.de/school/" + str(school["portal_token"])
+            portal_url = f"{PUBLIC_BASE_URL}/school/{school['portal_token']}"
         payload = {
             "event": "job_approved_for_school",
             "school_id": school["id"],
@@ -954,10 +1051,11 @@ def _notify_school_new_lead(lead_id: int, school_id: int | None, note: str = "")
         try:
             req = _ur.Request(webhook, data=_j.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
             _ur.urlopen(req, timeout=10).read(256)
-            sent = True
-        except Exception:
-            continue
-    return sent
+            sent_count += 1
+            _record_notification("job_approved_for_school", lead_id, school["id"], email, "sent")
+        except Exception as exc:
+            _record_notification("job_approved_for_school", lead_id, school["id"], email, "error", str(exc))
+    return sent_count
 
 
 @app.get("/api/leads/pending")
@@ -1016,16 +1114,14 @@ def approve_lead(lead_id: int, body: dict) -> dict:
             exec_sql(
                 "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
                 (lead_id, school_id, note, now()))
-            if _notify_school_new_lead(lead_id, school_id, note):
-                notification_count += 1
+            notification_count += _notify_school_new_lead(lead_id, school_id, note)
         assigned = len(school_ids)
     else:
         exec_sql(
             "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,NULL,?,?)",
             (lead_id, note, now()))
         assigned = 0
-        if _notify_school_new_lead(lead_id, None, note):
-            notification_count = 1
+        notification_count = _notify_school_new_lead(lead_id, None, note)
     return {"ok": True, "assigned_to": assigned, "notification_count": notification_count}
 
 
@@ -1215,15 +1311,18 @@ def admin_add_job_submit(
         "subject": f"[{source}] {url or 'Manual Entry'}",
         "raw_text": raw, "raw_meta": {"url": url, "source_label": source},
     }
+    webhook = MANUAL_JOB_WEBHOOK
+    if not webhook:
+        return {"ok": False, "queued": False, "reason": "manual_job_webhook_not_configured"}
     req = _ur.Request(
-        "https://n8n.157.180.112.46.sslip.io/webhook/jobradar-manual",
+        webhook,
         data=_j.dumps(payload).encode(),
         headers={"Content-Type": "application/json"}, method="POST")
     try:
         _ur.urlopen(req, timeout=10)
-    except Exception:
-        pass
-    return {"ok": True}
+        return {"ok": True, "queued": True}
+    except Exception as exc:
+        return {"ok": False, "queued": False, "reason": "webhook_error", "error": str(exc)[:200]}
 
 
 
