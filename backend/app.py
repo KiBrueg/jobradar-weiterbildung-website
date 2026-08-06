@@ -4,6 +4,7 @@ import base64
 import binascii
 import csv
 import html
+import io
 import json
 import os
 import secrets
@@ -247,6 +248,26 @@ def init_db() -> None:
               note TEXT DEFAULT '',
               created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS reports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL,
+              course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+              report_type TEXT DEFAULT 'School Report',
+              period_start TEXT DEFAULT '',
+              period_end TEXT DEFAULT '',
+              status TEXT DEFAULT 'prepared',
+              file_path TEXT DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS job_assignments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+              school_id INTEGER,
+              assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+              note TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_ja_lead ON job_assignments(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_ja_school ON job_assignments(school_id);
             """
         )
         # Safe migration for older DB created before schools table.
@@ -255,6 +276,19 @@ def init_db() -> None:
             con.execute("ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL")
         if "provider" not in table_columns(con, "courses"):
             con.execute("ALTER TABLE courses ADD COLUMN provider TEXT DEFAULT ''")
+        school_cols = table_columns(con, "schools")
+        portal_migrations = {
+            "portal_token": "TEXT DEFAULT ''",
+            "portal_enabled": "INTEGER DEFAULT 0",
+            "portal_plan": "TEXT DEFAULT 'Pilot Portal'",
+            "portal_price_eur": "REAL DEFAULT 490",
+            "portal_valid_until": "TEXT DEFAULT 'Pilotphase · monatlich kuendbar'",
+            "portal_note": "TEXT DEFAULT ''",
+        }
+        for col, ddl in portal_migrations.items():
+            if col not in school_cols:
+                con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
+                school_cols.add(col)
         existing_courses = con.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
         seed_time = now()
         if not existing_courses:
@@ -656,6 +690,525 @@ def school_report_data(school_id: int) -> dict[str, Any]:
 
 def safe_report_name(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name).strip("_") or "school"
+
+
+PORTAL_VISIBLE_LEAD_STATUSES = {"approved", "freigegeben", "visible", "strong fit"}
+
+
+def new_portal_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _split_lines(value: Any) -> list[str]:
+    text = str(value or "")
+    if "\n" in text:
+        return [x.strip() for x in text.splitlines() if x.strip()]
+    return [x.strip() for x in text.split(",") if x.strip()]
+
+
+def school_portal_data(token: str) -> dict[str, Any]:
+    """Return a school-scoped, customer-safe data view for /school/{token}.
+
+    This intentionally excludes internal costs, email drafts, raw source payloads,
+    n8n state, prompts, credentials, rejected leads and other schools.
+    """
+    init_db()
+    if not token or len(token) < 24:
+        raise HTTPException(404, "portal not found")
+    school = one(
+        """SELECT id,name,website,contact_email,status,note,portal_plan,portal_price_eur,
+                  portal_valid_until,portal_note
+             FROM schools
+             WHERE portal_token=? AND portal_enabled=1 AND status<>'archived'""",
+        (token,),
+    )
+    if not school:
+        raise HTTPException(404, "portal not found")
+
+    school_id = int(school["id"])
+    courses = rows(
+        """SELECT id,name,funding,remote,fit_score,status,updated_at
+             FROM courses
+             WHERE school_id=? AND status<>'archived'
+             ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'review' THEN 1 WHEN 'risk' THEN 2 ELSE 3 END, name""",
+        (school_id,),
+    )
+    profiles_raw = rows(
+        """SELECT sp.id,sp.course_id,c.name AS course_name,sp.target_titles,sp.skills,
+                  sp.location_rules,sp.language_rules,sp.exclude_titles,sp.active,sp.updated_at
+             FROM search_profiles sp JOIN courses c ON c.id=sp.course_id
+             WHERE c.school_id=? AND c.status<>'archived'
+             ORDER BY c.name""",
+        (school_id,),
+    )
+    profiles = [
+        {
+            "id": p["id"],
+            "course_id": p["course_id"],
+            "course_name": p["course_name"],
+            "target_titles": _split_lines(p["target_titles"]),
+            "skills": _split_lines(p["skills"]),
+            "location_rules": p["location_rules"],
+            "language_rules": p["language_rules"],
+            "active": bool(p["active"]),
+            "updated_at": p["updated_at"],
+        }
+        for p in profiles_raw
+    ]
+    leads = rows(
+        """SELECT l.id,l.course_id,c.name AS course_name,l.title,l.provider,l.status,l.score,
+                  l.why_fit,l.missing_evidence,l.updated_at
+             FROM leads l
+             JOIN job_assignments ja ON ja.lead_id=l.id
+             JOIN courses c ON c.id=l.course_id
+             WHERE lower(l.status)='approved'
+               AND (ja.school_id=? OR ja.school_id IS NULL)
+             ORDER BY l.score DESC, l.updated_at DESC""",
+        (school_id,),
+    )
+    documents = rows(
+        """SELECT d.id,d.course_id,c.name AS course_name,d.original_name,d.doc_type,d.access,d.status,d.uploaded_at
+             FROM documents d JOIN courses c ON c.id=d.course_id
+             WHERE c.school_id=? AND lower(COALESCE(d.access,'')) IN ('school','public')
+             ORDER BY d.uploaded_at DESC""",
+        (school_id,),
+    )
+    reports = rows(
+        """SELECT id,course_id,report_type,period_start,period_end,status,created_at
+             FROM reports
+             WHERE school_id=? AND lower(COALESCE(status,'')) IN ('prepared','published','ready')
+             ORDER BY created_at DESC LIMIT 12""",
+        (school_id,),
+    )
+    stats = {
+        "courses": len(courses),
+        "profiles": len(profiles),
+        "approved_matches": len(leads),
+        "reports": len(reports),
+        "avg_score": round(sum(int(l["score"] or 0) for l in leads) / len(leads), 1) if leads else 0,
+    }
+    return {
+        "school": school,
+        "tariff": {
+            "plan": school.get("portal_plan") or "Pilot Portal",
+            "price_eur": school.get("portal_price_eur") or 490,
+            "valid_until": school.get("portal_valid_until") or "Pilotphase · monatlich kuendbar",
+            "included": [
+                "bis 2 Kurse im Pilot",
+                "4 Suchlaeufe pro Monat",
+                "gepruefte Matches statt Rohdaten",
+                "schulbezogene Reports",
+                "Aenderungswuensche ueber Freigabeprozess",
+            ],
+        },
+        "stats": stats,
+        "courses": courses,
+        "profiles": profiles,
+        "leads": leads,
+        "documents": documents,
+        "reports": reports,
+        "generated_at": now(),
+    }
+
+
+def portal_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+    }
+
+
+def render_school_portal_html(data: dict[str, Any], token: str) -> str:
+    def e(v: Any) -> str:
+        return html.escape(str(v or ""))
+
+    school = data["school"]
+    tariff = data["tariff"]
+    stats = data["stats"]
+    course_rows = "".join(
+        f"<tr><td><b>{e(c['name'])}</b></td><td>{e(c['funding'])}</td><td>{e(c['remote'])}</td><td>{e(c['status'])}</td><td>{e(c['fit_score'])}%</td></tr>"
+        for c in data["courses"]
+    ) or "<tr><td colspan='5' class='empty'>Noch keine Kurse freigegeben.</td></tr>"
+    lead_rows = "".join(
+        f"<tr><td><b>{e(l['title'])}</b><br><span>{e(l['provider'])}</span></td><td>{e(l['course_name'])}</td><td>{e(l['score'])}%</td><td>{e(l['why_fit'])}</td></tr>"
+        for l in data["leads"]
+    ) or "<tr><td colspan='4' class='empty'>Noch keine freigegebenen Matches.</td></tr>"
+    report_rows = "".join(
+        f"<tr><td>{e(r['report_type'])}</td><td>{e(r['period_start'])} – {e(r['period_end'])}</td><td>{e(r['status'])}</td></tr>"
+        for r in data["reports"]
+    ) or "<tr><td colspan='3' class='empty'>Noch keine Reports freigegeben.</td></tr>"
+    profile_cards = "".join(
+        f"<section class='mini'><h3>{e(p['course_name'])}</h3><p><b>Zielrollen:</b> {e(', '.join(p['target_titles'][:5]))}</p><p><b>Skills:</b> {e(', '.join(p['skills'][:8]))}</p><p><b>Region:</b> {e(p['location_rules'])}</p></section>"
+        for p in data["profiles"]
+    ) or "<p class='muted'>Noch keine Suchprofile freigegeben.</p>"
+    included = "".join(f"<li>{e(x)}</li>" for x in tariff["included"])
+    return f"""<!doctype html><html lang='de'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'>
+<title>JobRadar Schulportal – {e(school['name'])}</title>
+<style>
+:root{{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--brand:#2563eb;--ok:#059669}}
+*{{box-sizing:border-box}}body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;background:#f8fafc;color:var(--ink)}}
+.wrap{{max-width:1180px;margin:0 auto;padding:28px 20px}}.hero{{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:white;padding:48px 0}}
+.badge{{display:inline-flex;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;color:#dbeafe;font-size:12px;font-weight:700}}
+h1{{font-size:clamp(32px,5vw,56px);line-height:1.02;margin:18px 0 12px;letter-spacing:-.04em}}p{{line-height:1.6}}.muted{{color:var(--muted)}}
+.grid{{display:grid;gap:16px}}.kpis{{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:22px}}.card{{background:white;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 28px rgba(15,23,42,.06)}}
+.kpi b{{display:block;font-size:28px}}.kpi span{{color:var(--muted);font-size:13px}}.cols{{grid-template-columns:1fr 2fr}}table{{width:100%;border-collapse:collapse;font-size:14px}}th,td{{text-align:left;border-bottom:1px solid #eef2f7;padding:12px;vertical-align:top}}th{{color:#475569;background:#f8fafc;font-size:12px;text-transform:uppercase;letter-spacing:.04em}}td span{{color:var(--muted);font-size:12px}}.empty{{text-align:center;color:#94a3b8;padding:28px}}.mini{{border:1px solid #e2e8f0;border-radius:14px;padding:14px;margin:10px 0;background:#fbfdff}}.safe{{background:#0f172a;color:white}}.safe li{{margin:8px 0;color:#cbd5e1}}a.btn{{display:inline-flex;gap:8px;align-items:center;border-radius:12px;background:white;color:#0f172a;padding:11px 14px;text-decoration:none;font-weight:700;margin-right:8px}}a.btn.secondary{{background:#dbeafe;color:#1e40af}}@media(max-width:800px){{.kpis,.cols{{grid-template-columns:1fr}}}}
+</style></head><body>
+<header class='hero'><div class='wrap'><span class='badge'>JobRadar Schulportal · read-only · noindex</span><h1>{e(school['name'])}</h1><p>Ihre freigegebene Sicht auf Kurse, Suchprofile, gepruefte Matches und Reports. Interne Kosten, Rohdaten, Logs und andere Schulen bleiben verborgen.</p><p><a class='btn' href='/school/{e(token)}/report.html'>HTML-Report</a><a class='btn secondary' href='/school/{e(token)}/report.csv'>CSV herunterladen</a></p></div></header>
+<main class='wrap'>
+<section class='grid kpis'><div class='card kpi'><b>{stats['courses']}</b><span>Kurse</span></div><div class='card kpi'><b>{stats['profiles']}</b><span>Suchprofile</span></div><div class='card kpi'><b>{stats['approved_matches']}</b><span>freigegebene Matches</span></div><div class='card kpi'><b>{stats['reports']}</b><span>Reports</span></div></section>
+<section class='grid cols' style='margin-top:16px'><div class='card'><h2>Tarif & Leistung</h2><p><b>{e(tariff['plan'])}</b><br>{e(tariff['price_eur'])} € / Monat<br><span class='muted'>{e(tariff['valid_until'])}</span></p><ul>{included}</ul></div><div class='card'><h2>Kurse</h2><table><tr><th>Kurs</th><th>Foerderung</th><th>Remote</th><th>Status</th><th>Fit</th></tr>{course_rows}</table></div></section>
+<section class='card' style='margin-top:16px'><h2>Suchprofile</h2>{profile_cards}</section>
+<section class='card' style='margin-top:16px'><h2>Freigegebene Matches</h2><p class='muted'>Nur portal-sichtbare Treffer; Kandidaten in QA, Rejected Leads und interne Notizen werden nicht angezeigt.</p><table><tr><th>Rolle</th><th>Kurs</th><th>Fit</th><th>Warum passend</th></tr>{lead_rows}</table></section>
+<section class='card' style='margin-top:16px'><h2>Reports</h2><table><tr><th>Typ</th><th>Zeitraum</th><th>Status</th></tr>{report_rows}</table></section>
+<section class='card safe' style='margin-top:16px'><h2>Bewusst verborgen</h2><ul><li>interne Parser-/LLM-/n8n-/Hostingkosten und Marge</li><li>Rohdaten, Scraping-Logs, Prompts, Credentials und Webhooks</li><li>andere Schulen, abgelehnte Treffer und interne QA-Notizen</li></ul></section>
+<p class='muted'>Generiert: {e(data['generated_at'])}</p>
+</main></body></html>"""
+
+
+
+# ── Job Pool & Manual Add ─────────────────────────────────────────────────────
+
+def _similar_title_duplicates(lead_id: int, title: str) -> list:
+    words = {
+        w for w in "".join(
+            ch.lower() if ch.isalnum() else " "
+            for ch in (title or "")
+        ).split()
+        if len(w) >= 4
+    }
+    if not words:
+        return []
+    result = []
+    for row in rows(
+        "SELECT id,title FROM leads WHERE id<>? AND lower(status) IN ('new','candidate','approved')",
+        (lead_id,),
+    ):
+        other = {
+            w for w in "".join(
+                ch.lower() if ch.isalnum() else " "
+                for ch in (row.get("title") or "")
+            ).split()
+            if len(w) >= 4
+        }
+        if other and len(words & other) / max(1, min(len(words), len(other))) >= 0.6:
+            result.append(int(row["id"]))
+    return result[:8]
+
+
+@app.get("/api/leads/pending")
+def leads_pending() -> dict:
+    init_db()
+    pending = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.why_fit,l.missing_evidence,
+                  l.risks,l.sources,l.status,l.updated_at
+             FROM leads l WHERE lower(l.status) IN ('new','candidate')
+             ORDER BY l.score DESC""")
+    for lead in pending:
+        lead["duplicates"] = _similar_title_duplicates(int(lead["id"]), lead.get("title") or "")
+    schools_list = rows("SELECT id,name FROM schools WHERE status<>'archived' ORDER BY name")
+    return {"leads": pending, "schools": schools_list}
+
+
+@app.get("/api/pool")
+def leads_pool() -> dict:
+    init_db()
+    pool = rows(
+        """SELECT
+             l.id, l.title, l.provider, l.score, l.why_fit, l.status, l.updated_at,
+             CASE
+               WHEN SUM(CASE WHEN ja.school_id IS NULL THEN 1 ELSE 0 END) > 0
+                 THEN 'Alle Schulen'
+               ELSE COALESCE(GROUP_CONCAT(s.name, ' · '), 'Nicht zugewiesen')
+             END AS assigned_to,
+             CASE
+               WHEN SUM(CASE WHEN ja.school_id IS NULL THEN 1 ELSE 0 END) > 0
+                 THEN 0
+               ELSE COUNT(ja.school_id)
+             END AS assigned_count
+           FROM leads l
+           LEFT JOIN job_assignments ja ON ja.lead_id = l.id
+           LEFT JOIN schools s ON s.id = ja.school_id
+           WHERE lower(l.status) = 'approved'
+           GROUP BY l.id
+           ORDER BY l.score DESC""")
+    return {"leads": pool}
+
+
+@app.post("/api/leads/{lead_id}/approve")
+def approve_lead(lead_id: int, body: dict) -> dict:
+    init_db()
+    lead = one("SELECT id FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    school_ids = body.get("school_ids", [])
+    note = body.get("note", "")
+    exec_sql("UPDATE leads SET status='Approved',updated_at=? WHERE id=?", (now(), lead_id))
+    exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
+    if school_ids:
+        for sid in school_ids:
+            exec_sql(
+                "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
+                (lead_id, int(sid), note, now()))
+        assigned = len(school_ids)
+    else:
+        exec_sql(
+            "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,NULL,?,?)",
+            (lead_id, note, now()))
+        assigned = 0
+    return {"ok": True, "assigned_to": assigned}
+
+
+@app.post("/api/leads/{lead_id}/reject")
+def reject_lead(lead_id: int) -> dict:
+    init_db()
+    exec_sql("UPDATE leads SET status='Rejected',updated_at=? WHERE id=?", (now(), lead_id))
+    exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
+    return {"ok": True}
+
+
+@app.get("/admin/pool", response_class=HTMLResponse)
+def admin_pool(request: Request):
+    init_db()
+    pending = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.why_fit,l.status,l.updated_at
+             FROM leads l WHERE lower(l.status) IN ('new','candidate')
+             ORDER BY l.score DESC""")
+    approved = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.status,l.updated_at,
+                  COALESCE(GROUP_CONCAT(s.name,' · '),'Alle Schulen') AS assigned_to
+             FROM leads l
+             LEFT JOIN job_assignments ja ON ja.lead_id=l.id
+             LEFT JOIN schools s ON s.id=ja.school_id
+             WHERE lower(l.status)='approved'
+             GROUP BY l.id ORDER BY l.score DESC""")
+    schools_list = rows("SELECT id,name FROM schools WHERE status<>'archived' ORDER BY name")
+
+    def sc(v):
+        v = int(v or 0)
+        return "#22c55e" if v >= 80 else "#f59e0b" if v >= 60 else "#ef4444"
+
+    school_opts = "".join(
+        "<label style='display:block;margin:4px 0'>"
+        "<input type='checkbox' name='sid' value='" + str(s["id"]) + "'> " + e(s["name"]) + "</label>"
+        for s in schools_list)
+
+    def prow(l):
+        sid = l["id"]; sc_ = sc(l["score"]); score = l["score"]
+        title = e(l["title"]); prov = e(l["provider"])
+        why = e((l["why_fit"] or "")[:80])
+        return (
+            "<tr><td><b style='color:" + sc_ + "'>" + str(score) + "</b></td>"
+            "<td>" + title + "</td><td>" + prov + "</td>"
+            "<td style='font-size:13px;color:#64748b'>" + why + "</td>"
+            "<td>"
+            "<button onclick='openApprove(" + str(sid) + ","" + title + "")' class='bok'>&#10003; Freigeben</button> "
+            "<button onclick='doReject(" + str(sid) + ")' class='bno'>&#10007; Ablehnen</button>"
+            "</td></tr>")
+
+    def arow(l):
+        sid = l["id"]; sc_ = sc(l["score"]); score = l["score"]
+        title = e(l["title"]); prov = e(l["provider"])
+        assigned = e(l["assigned_to"] or "Alle Schulen")
+        date = (l["updated_at"] or "")[:10]
+        return (
+            "<tr><td><b style='color:" + sc_ + "'>" + str(score) + "</b></td>"
+            "<td>" + title + "</td><td>" + prov + "</td>"
+            "<td>" + assigned + "</td>"
+            "<td>" + date + "</td>"
+            "<td><button onclick='doReject(" + str(sid) + ")' class='bno'>Widerrufen</button></td></tr>")
+
+    prows = "".join(prow(l) for l in pending) or "<tr><td colspan=5 style='text-align:center;padding:20px;color:#94a3b8'>Keine offenen Stellen</td></tr>"
+    arows = "".join(arow(l) for l in approved) or "<tr><td colspan=6 style='text-align:center;padding:20px;color:#94a3b8'>Noch keine freigegebenen Stellen</td></tr>"
+
+    html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'><title>Job Pool</title>
+<style>
+body{{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}}
+nav{{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}}
+nav a{{color:#94a3b8;text-decoration:none;font-size:14px}}nav a:hover{{color:#fff}}
+nav b{{color:#fff}}
+.wrap{{max-width:1100px;margin:28px auto;padding:0 20px}}
+h2{{margin:24px 0 10px;font-size:18px}}
+table{{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}}
+th{{background:#f1f5f9;padding:9px 12px;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase}}
+td{{padding:9px 12px;border-top:1px solid #f1f5f9;font-size:13px}}
+.bok{{background:#22c55e;color:#fff;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}}
+.bno{{background:#ef4444;color:#fff;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}}
+.overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center}}
+.overlay.on{{display:flex}}
+.modal{{background:#fff;border-radius:12px;padding:24px;min-width:340px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,.18)}}
+.modal h3{{margin:0 0 8px}}.modal p{{color:#64748b;margin:0 0 14px;font-size:14px}}
+textarea{{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:8px;font-size:13px}}
+.mact{{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}}
+.mbtn{{padding:8px 16px;border:1px solid #e2e8f0;background:#fff;border-radius:6px;cursor:pointer;font-size:13px}}
+</style></head><body>
+<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>
+<div class='wrap'>
+  <h2>Zur Pruefung ({len(pending)})</h2>
+  <table><thead><tr><th>Score</th><th>Titel</th><th>Anbieter</th><th>Warum passend</th><th>Aktion</th></tr></thead>
+  <tbody>{prows}</tbody></table>
+  <h2>Freigegeben ({len(approved)})</h2>
+  <table><thead><tr><th>Score</th><th>Titel</th><th>Anbieter</th><th>Zugewiesen</th><th>Datum</th><th>Aktion</th></tr></thead>
+  <tbody>{arows}</tbody></table>
+</div>
+<div class='overlay' id='ov'>
+  <div class='modal'>
+    <h3>Stelle freigeben</h3>
+    <p id='mt'></p>
+    <b style='font-size:13px'>Schulen:</b>
+    <label style='display:block;margin:8px 0 4px;font-size:13px'><input type='checkbox' id='allCb' checked onchange='toggleAll(this)'> <b>Alle Schulen</b></label>
+    <div id='scb' style='margin-left:16px;opacity:.4;pointer-events:none;font-size:13px'>{school_opts}</div>
+    <br><b style='font-size:13px'>Notiz (optional):</b>
+    <textarea id='note' rows='3' placeholder='z.B. Gute Remote-Option...'></textarea>
+    <div class='mact'>
+      <button class='mbtn' onclick='closeM()'>Abbrechen</button>
+      <button class='bok' style='padding:8px 16px' onclick='submitApprove()'>Freigeben</button>
+    </div>
+  </div>
+</div>
+<script>
+let cid=null;
+function openApprove(id,t){{cid=id;document.getElementById('mt').textContent=t;document.getElementById('ov').classList.add('on');}}
+function closeM(){{document.getElementById('ov').classList.remove('on');cid=null;}}
+function toggleAll(cb){{const d=document.getElementById('scb');d.style.opacity=cb.checked?'.4':'1';d.style.pointerEvents=cb.checked?'none':'auto';d.querySelectorAll('input').forEach(i=>i.checked=false);}}
+async function submitApprove(){{
+  const all=document.getElementById('allCb').checked;
+  const sids=all?[]:[...document.querySelectorAll('#scb input:checked')].map(i=>+i.value);
+  const note=document.getElementById('note').value;
+  await fetch('/api/leads/'+cid+'/approve',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{school_ids:sids,note}})}});
+  closeM();location.reload();
+}}
+async function doReject(id){{if(!confirm('Ablehnen?'))return;await fetch('/api/leads/'+id+'/reject',{{method:'POST'}});location.reload();}}
+</script></body></html>"""
+    return HTMLResponse(html)
+
+
+@app.get("/admin/add-job", response_class=HTMLResponse)
+def admin_add_job_form(request: Request):
+    html = """<!DOCTYPE html><html><head><meta charset='utf-8'><title>Stelle hinzufuegen</title>
+<style>
+body{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}
+nav{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}
+nav a{color:#94a3b8;text-decoration:none;font-size:14px}nav a:hover{color:#fff}
+nav b{color:#fff}
+.wrap{max-width:620px;margin:40px auto;padding:0 20px}
+.card{background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+label{display:block;font-weight:500;margin:14px 0 5px;font-size:14px}
+input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit}
+textarea{resize:vertical}
+.btn{background:#1e293b;color:#fff;border:none;padding:11px 20px;border-radius:8px;cursor:pointer;font-size:14px;width:100%;margin-top:18px}
+.ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:14px;margin-top:14px;display:none}
+</style></head><body>
+<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>
+<div class='wrap'><div class='card'>
+  <h2 style='margin-top:0'>Stelle manuell hinzufuegen</h2>
+  <p style='color:#64748b;font-size:14px'>Die Stelle wird in der Pruefungswarteschlange angezeigt.</p>
+  <form id='f'>
+    <label>URL (optional)</label>
+    <input type='url' name='url' placeholder='https://jobs.example.com/...' />
+    <label>Beschreibungstext (URL oder Text einfuegen)</label>
+    <textarea name='description' rows='8' placeholder='Jobbeschreibung einfuegen...'></textarea>
+    <label>Quelle</label>
+    <select name='source'>
+      <option>ChatGPT DeepSearch</option><option>Hermes</option>
+      <option>LinkedIn</option><option>Stepstone</option>
+      <option>Indeed</option><option>Remotive</option><option>Andere</option>
+    </select>
+    <button type='submit' class='btn'>Zur Pruefung einreichen</button>
+  </form>
+  <div class='ok' id='ok'>Eingereicht! Erscheint in Kuerze im <a href='/admin/pool'>Job Pool</a>.</div>
+</div></div>
+<script>
+document.getElementById('f').onsubmit=async(e)=>{
+  e.preventDefault();
+  const fd=new FormData(e.target);
+  await fetch('/admin/add-job',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fd)});
+  document.getElementById('ok').style.display='block';
+  e.target.reset();
+};
+</script></body></html>"""
+    return HTMLResponse(html)
+
+
+@app.post("/admin/add-job")
+def admin_add_job_submit(
+    url: str = Form(default=""),
+    description: str = Form(default=""),
+    source: str = Form(default="Andere"),
+):
+    import urllib.request as _ur, json as _j
+    raw = description.strip() or url.strip()
+    if not raw:
+        raise HTTPException(400, "URL oder Beschreibung erforderlich")
+    payload = {
+        "input_source": "manual", "source_detail": "manual_text",
+        "subject": f"[{source}] {url or 'Manual Entry'}",
+        "raw_text": raw, "raw_meta": {"url": url, "source_label": source},
+    }
+    req = _ur.Request(
+        "https://n8n.157.180.112.46.sslip.io/webhook/jobradar-manual",
+        data=_j.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        _ur.urlopen(req, timeout=10)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/admin/api/schools/{school_id}/portal-token")
+def get_or_create_school_portal_token(school_id: int) -> dict[str, Any]:
+    init_db()
+    school = one("SELECT id,name,portal_token,portal_enabled FROM schools WHERE id=?", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    token = school.get("portal_token") or new_portal_token()
+    exec_sql("UPDATE schools SET portal_token=?,portal_enabled=1,updated_at=? WHERE id=?", (token, now(), school_id))
+    return {"ok": True, "school_id": school_id, "school": school["name"], "portal_path": f"/school/{token}"}
+
+
+@app.get("/school/{token}", response_class=HTMLResponse, include_in_schema=False)
+def school_portal(token: str) -> HTMLResponse:
+    try:
+        data = school_portal_data(token)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return HTMLResponse(
+                "<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='robots' content='noindex,nofollow'><title>Portal nicht gefunden</title></head><body><h1>Portal nicht gefunden</h1></body></html>",
+                status_code=404,
+                headers=portal_headers(),
+            )
+        raise
+    return HTMLResponse(render_school_portal_html(data, token), headers=portal_headers())
+
+
+@app.get("/school/{token}/report.json", include_in_schema=False)
+def school_portal_report_json(token: str) -> Response:
+    data = school_portal_data(token)
+    return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers=portal_headers())
+
+
+@app.get("/school/{token}/report.csv", include_in_schema=False)
+def school_portal_report_csv(token: str) -> Response:
+    data = school_portal_data(token)
+    out = io.StringIO()
+    writer = csv.writer(out, delimiter=";")
+    writer.writerow(["school", data["school"]["name"], "generated_at", data["generated_at"]])
+    writer.writerow(["type", "course", "status", "score", "details"])
+    for c in data["courses"]:
+        writer.writerow(["course", c["name"], c["status"], c["fit_score"], f"funding={c['funding']} remote={c['remote']}"])
+    for l in data["leads"]:
+        writer.writerow(["approved_match", l["course_name"], l["status"], l["score"], l["title"]])
+    for r in data["reports"]:
+        writer.writerow(["report", r.get("report_type"), r.get("status"), "", f"{r.get('period_start')} - {r.get('period_end')}"])
+    headers = portal_headers() | {"Content-Disposition": f"attachment; filename={safe_report_name(data['school']['name'])}_portal_report.csv"}
+    return Response(out.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/school/{token}/report.html", response_class=HTMLResponse, include_in_schema=False)
+def school_portal_report_html(token: str) -> HTMLResponse:
+    data = school_portal_data(token)
+    return HTMLResponse(render_school_portal_html(data, token), headers=portal_headers())
 
 
 @app.get("/api/reports/school/{school_id}")
