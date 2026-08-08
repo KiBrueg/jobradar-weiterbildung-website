@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Clock, Euro, TrendingUp, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Euro, TrendingUp, Zap, Brain } from 'lucide-react';
 
 /* ─── Data ──────────────────────────────────────────────────────────────── */
 
@@ -27,6 +27,12 @@ const SLIDES = [
     label: '04 Ihr ROI',
     icon: Euro,
     color: 'accent',
+  },
+  {
+    id: 'coaching',
+    label: '05 Coaching-Fokus',
+    icon: Brain,
+    color: 'brand',
   },
 ] as const;
 
@@ -82,10 +88,21 @@ function SlideProblem() {
             </div>
           ))}
         </div>
+        <div className="space-y-2">
+          {[
+            { icon: '❌', text: 'Nur 3–8 Quellen gleichzeitig im Blick' },
+            { icon: '❌', text: 'Nur 15–20 % des Marktes wird erfasst' },
+            { icon: '❌', text: 'Hohe Fehlerquote & Doppelarbeit' },
+          ].map((r) => (
+            <div key={r.text} className="flex items-center gap-2 text-sm text-rose-700">
+              <span>{r.icon}</span><span>{r.text}</span>
+            </div>
+          ))}
+        </div>
         <div className="rounded-xl bg-rose-600 px-5 py-4 text-white">
-          <div className="text-xs font-semibold uppercase tracking-wide text-rose-200 mb-1">Pro Klient / Woche</div>
-          <div className="text-3xl font-bold">3–4 Stunden</div>
-          <div className="text-rose-200 text-sm mt-0.5">bei 10 Klienten = <strong className="text-white">30–40 Std./Woche</strong></div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-rose-200 mb-1">Pro Berater / Woche (Recherche gesamt)</div>
+          <div className="text-3xl font-bold">ca. 5 Stunden</div>
+          <div className="text-rose-200 text-sm mt-0.5">≈ 30 Min pro Klient · 10 Klienten · <strong className="text-white">bis zu 8.000 € / Jahr</strong></div>
         </div>
       </div>
 
@@ -99,14 +116,14 @@ function SlideProblem() {
         </h3>
 
         <BarChart bars={[
-          { label: '10 Klienten, 1 Berater', value: 35, max: 35, color: '#f43f5e', unit: ' Std/Wo' },
-          { label: '20 Klienten, 2 Berater', value: 35, max: 35, color: '#f43f5e', unit: ' Std/Wo' },
+          { label: '1 Berater (10 Klienten) — Recherche', value: 5, max: 40, color: '#f43f5e', unit: ' Std/Wo' },
+          { label: '2 Berater (20 Klienten) — Recherche', value: 10, max: 40, color: '#f43f5e', unit: ' Std/Wo' },
         ]} />
 
         <div className="space-y-2">
           {[
-            { label: '10 Klienten × 14 Std/Mo × €40', value: '€ 5.600', sub: 'pro Monat Personalkosten Recherche' },
-            { label: '20 Klienten × 14 Std/Mo × €40', value: '€ 11.200', sub: 'pro Monat bei Skalierung' },
+            { label: '1 Berater × 3–5 Std/Wo × 50 Wochen', value: '€ 8.000', sub: 'Personalkosten Recherche pro Jahr' },
+            { label: '2 Berater × 10 Klienten je', value: '€ 16.000', sub: 'pro Jahr bei Skalierung' },
           ].map((r) => (
             <div key={r.label} className="flex items-center justify-between rounded-xl border border-rose-200 bg-white px-4 py-3">
               <div>
@@ -118,8 +135,20 @@ function SlideProblem() {
           ))}
         </div>
 
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { value: '3–8', label: 'Quellen' },
+            { value: '~250', label: 'Stellen / Monat' },
+            { value: '20–50', label: 'Relevante Treffer' },
+          ].map((k) => (
+            <div key={k.label} className="rounded-xl border border-rose-200 bg-white px-3 py-3 text-center">
+              <div className="text-xl font-bold text-rose-600">{k.value}</div>
+              <div className="text-xs text-ink-500 mt-0.5">{k.label}</div>
+            </div>
+          ))}
+        </div>
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-          <strong>Und das jeden Monat</strong> — für Aufgaben, die kein Fachwissen brauchen.
+          <strong>Bis zu 8.000 € / Jahr</strong> — für Aufgaben, die kein Fachwissen brauchen.
         </div>
       </div>
     </div>
@@ -138,7 +167,7 @@ function SlideAutomation() {
         </h3>
         <div className="space-y-3">
           {[
-            { task: 'Stellen aus 8+ Quellen erfassen', value: '81/Tag', icon: '🤖' },
+            { task: 'Jobportale + 2.000+ Firmenseiten via Gelbe Seiten', value: '81/Tag', icon: '🤖' },
             { task: 'KI-gestützte Anforderungsanalyse', value: '99,7 %', icon: '🧠' },
             { task: 'Automatischer Abgleich mit Kursprofil', value: '<1 Sek', icon: '⚡' },
             { task: 'Fit-Score & Report generieren', value: '0 Min', icon: '📊' },
@@ -149,6 +178,18 @@ function SlideAutomation() {
               <span className="shrink-0 text-xs font-semibold text-accent-700 bg-accent-100 px-2 py-0.5 rounded-full">
                 {row.value}
               </span>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { value: '2.200+', label: 'Quellen' },
+            { value: '~2.400', label: 'Stellen / Monat' },
+            { value: '394+', label: 'Relevante Treffer' },
+          ].map((k) => (
+            <div key={k.label} className="rounded-xl border border-accent-200 bg-white px-3 py-3 text-center">
+              <div className="text-xl font-bold text-accent-600">{k.value}</div>
+              <div className="text-xs text-ink-500 mt-0.5">{k.label}</div>
             </div>
           ))}
         </div>
@@ -168,10 +209,10 @@ function SlideAutomation() {
 
         <div className="grid grid-cols-2 gap-3">
           {[
-            { value: '2.868', label: 'Stellen analysiert', color: 'bg-brand-600' },
-            { value: '81,2', label: 'Neue Stellen/Tag', color: 'bg-accent-600' },
-            { value: '99,7 %', label: 'Parse-Qualität', color: 'bg-accent-600' },
-            { value: '8+', label: 'Quellen aktiv', color: 'bg-brand-600' },
+            { value: '2.200+', label: 'Seiten überwacht', color: 'bg-brand-600' },
+            { value: '~2.400', label: 'Stellen / Monat', color: 'bg-accent-600' },
+            { value: '394+', label: 'Relevante Treffer', color: 'bg-accent-600' },
+            { value: '0–100', label: 'KI-Relevanz-Score', color: 'bg-brand-600' },
           ].map((m) => (
             <div key={m.label} className={`${m.color} rounded-xl p-4 text-white`}>
               <div className="text-2xl font-bold">{m.value}</div>
@@ -182,11 +223,11 @@ function SlideAutomation() {
 
         <div className="space-y-2">
           {[
-            { label: 'Gmail (Jobagenten)', icon: '📧' },
-            { label: 'Firecrawl Web Scraping', icon: '🕸️' },
-            { label: 'IMAP (mail.de)', icon: '📬' },
-            { label: 'RSS Feeds', icon: '📡' },
-            { label: 'Arbeitsagentur API', icon: '🏛️' },
+            { label: 'LinkedIn, StepStone, Indeed', icon: '🌐' },
+            { label: 'Bundesagentur für Arbeit', icon: '🏛️' },
+            { label: '2.192 Firmenseiten (Gelbe Seiten)', icon: '🕸️' },
+            { label: 'Jobportale per Gmail-Agent', icon: '📧' },
+            { label: 'RSS Feeds & IMAP', icon: '📡' },
             { label: 'Webhook / Manuell', icon: '🔗' },
           ].map((s) => (
             <div key={s.label} className="flex items-center gap-2 text-sm text-ink-600">
@@ -211,74 +252,88 @@ function SlideComparison() {
         <h3 className="font-display text-2xl font-semibold text-ink-900">
           Zeitaufwand: Mensch vs. JobRadar
         </h3>
-        <p className="text-ink-500 text-sm mt-1">Stunden pro Monat für 10 Klienten</p>
+        <p className="text-ink-500 text-sm mt-1">Stunden pro Woche · 1 Berater · 10 Klienten</p>
       </div>
 
       {/* Big visual comparison */}
       <div className="grid md:grid-cols-2 gap-4">
         {/* Human */}
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-3">
             <span className="text-2xl">👤</span>
             <span className="font-semibold text-ink-800">Manuell</span>
             <span className="ml-auto text-xs text-rose-600 font-medium bg-rose-100 px-2 py-0.5 rounded-full">teuer</span>
           </div>
+          <p className="text-xs text-ink-400 mb-2">Pro Klient / Monat</p>
           <div className="space-y-2 mb-4">
             {[
-              { label: 'Stellensuche', h: 6 },
-              { label: 'Filtern & Prüfen', h: 4 },
-              { label: 'Profilabgleich', h: 4 },
-              { label: 'Dokumentation', h: 3 },
+              { label: 'Stellensuche', min: 60 },
+              { label: 'Filtern & Prüfen', min: 30 },
+              { label: 'Profilabgleich', min: 20 },
+              { label: 'Dokumentation', min: 10 },
             ].map((r) => (
               <div key={r.label} className="flex items-center gap-2 text-sm">
                 <span className="w-32 text-ink-600 shrink-0">{r.label}</span>
                 <div className="flex-1 h-5 rounded bg-rose-100 overflow-hidden">
-                  <div className="h-full rounded bg-rose-500" style={{ width: `${(r.h / 8) * 100}%` }} />
+                  <div className="h-full rounded bg-rose-500" style={{ width: `${(r.min / 120) * 100}%` }} />
                 </div>
-                <span className="text-xs font-semibold text-rose-700 w-10 text-right">{r.h * 10} Min</span>
+                <span className="text-xs font-semibold text-rose-700 w-12 text-right">{r.min} Min</span>
               </div>
             ))}
           </div>
-          <div className="border-t border-rose-200 pt-3 flex items-baseline justify-between">
-            <span className="text-sm text-rose-600">Gesamt/Monat</span>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-rose-600">140 Std</div>
-              <div className="text-xs text-rose-500">≈ €5.600/Monat</div>
+          <div className="border-t border-rose-200 pt-3 space-y-1">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-rose-600">Pro Klient/Monat</span>
+              <span className="font-bold text-rose-600">120 Min</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-rose-600">× 10 Klienten</span>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-rose-600">20 Std/Monat</div>
+                <div className="text-xs text-rose-500">= 5 Std/Woche · € 8.000/Jahr</div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* JobRadar */}
         <div className="rounded-2xl border border-accent-200 bg-accent-50 p-5">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-3">
             <span className="text-2xl">🤖</span>
             <span className="font-semibold text-ink-800">JobRadar</span>
             <span className="ml-auto text-xs text-accent-700 font-medium bg-accent-100 px-2 py-0.5 rounded-full">automatisch</span>
           </div>
+          <p className="text-xs text-ink-400 mb-2">Pro Klient / Monat</p>
           <div className="space-y-2 mb-4">
             {[
-              { label: 'Stellensuche', h: 0, note: 'Automatisch' },
-              { label: 'Analyse (KI)', h: 0, note: 'Automatisch' },
-              { label: 'Profilabgleich', h: 0, note: 'Automatisch' },
-              { label: 'Report Review', h: 0.5, note: '30 Min/Klient' },
+              { label: 'Stellensuche', h: 0 },
+              { label: 'Analyse (KI)', h: 0 },
+              { label: 'Profilabgleich', h: 0 },
+              { label: 'Report Review', min: 30 },
             ].map((r) => (
               <div key={r.label} className="flex items-center gap-2 text-sm">
                 <span className="w-32 text-ink-600 shrink-0">{r.label}</span>
                 <div className="flex-1 h-5 rounded bg-accent-100 overflow-hidden">
-                  {r.h > 0
-                    ? <div className="h-full rounded bg-accent-500" style={{ width: `${(r.h / 8) * 100}%` }} />
-                    : <div className="h-full flex items-center px-2"><span className="text-xs text-accent-600 font-medium">✓ KI</span></div>
+                  {r.min
+                    ? <div className="h-full rounded bg-accent-500" style={{ width: `${(r.min / 120) * 100}%` }} />
+                    : <div className="h-full flex items-center px-2"><span className="text-xs text-accent-600 font-medium">✓ automatisch</span></div>
                   }
                 </div>
-                <span className="text-xs font-semibold text-accent-700 w-10 text-right">{r.note}</span>
+                <span className="text-xs font-semibold text-accent-700 w-14 text-right">{r.min ? `${r.min} Min` : ''}</span>
               </div>
             ))}
           </div>
-          <div className="border-t border-accent-200 pt-3 flex items-baseline justify-between">
-            <span className="text-sm text-accent-600">Gesamt/Monat</span>
-            <div className="text-right">
-              <div className="text-3xl font-bold text-accent-600">5 Std</div>
-              <div className="text-xs text-accent-500">nur Review-Zeit</div>
+          <div className="border-t border-accent-200 pt-3 space-y-1">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-accent-600">Pro Klient/Monat</span>
+              <span className="font-bold text-accent-600">30 Min</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-accent-600">× 10 Klienten</span>
+              <div className="text-right">
+                <div className="text-2xl font-bold text-accent-600">5 Std/Monat</div>
+                <div className="text-xs text-accent-500">nur Review · 1,25 Std/Woche</div>
+              </div>
             </div>
           </div>
         </div>
@@ -288,17 +343,17 @@ function SlideComparison() {
       <div className="rounded-2xl bg-ink-900 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
         <div className="text-white">
           <div className="text-xs text-ink-400 uppercase tracking-wide">Zeitersparnis</div>
-          <div className="text-3xl font-bold">135 Std <span className="text-ink-400 text-lg font-normal">/ Monat</span></div>
+          <div className="text-3xl font-bold">5 Std <span className="text-ink-400 text-lg font-normal">/ Woche</span></div>
         </div>
         <div className="h-8 w-px bg-ink-700 hidden md:block" />
         <div className="text-white">
-          <div className="text-xs text-ink-400 uppercase tracking-wide">Das entspricht</div>
-          <div className="text-2xl font-bold">3,4 Vollzeit-Wochen</div>
+          <div className="text-xs text-ink-400 uppercase tracking-wide">Kostenersparnis</div>
+          <div className="text-2xl font-bold">bis zu 8.000 € / Jahr</div>
         </div>
         <div className="h-8 w-px bg-ink-700 hidden md:block" />
         <div className="text-white">
-          <div className="text-xs text-ink-400 uppercase tracking-wide">Effizienzgewinn</div>
-          <div className="text-3xl font-bold text-accent-400">96 %</div>
+          <div className="text-xs text-ink-400 uppercase tracking-wide">Zeitersparnis</div>
+          <div className="text-3xl font-bold text-accent-400">75 %</div>
         </div>
       </div>
     </div>
@@ -315,7 +370,7 @@ function SlideROI() {
         <h3 className="font-display text-2xl font-semibold text-ink-900">
           Ihr ROI — konkret gerechnet
         </h3>
-        <p className="text-ink-500 text-sm mt-1">Beispielrechnung für einen Weiterbildungsträger mit 10 aktiven Klienten</p>
+        <p className="text-ink-500 text-sm mt-1">Jahresrechnung · 1 Berater · 10 Klienten · 50 Wochen</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-4">
@@ -325,19 +380,19 @@ function SlideROI() {
           <div className="space-y-2 text-sm text-ink-700">
             <div className="flex justify-between">
               <span>Berater-Stundenlohn</span>
-              <span className="font-medium">€ 40</span>
+              <span className="font-medium">€ 32</span>
             </div>
             <div className="flex justify-between">
-              <span>Recherche/Klient/Monat</span>
-              <span className="font-medium">14 Std</span>
+              <span>Recherche-Std./Woche</span>
+              <span className="font-medium">5 Std</span>
             </div>
             <div className="flex justify-between">
-              <span>Klienten</span>
-              <span className="font-medium">10</span>
+              <span>Wochen/Jahr</span>
+              <span className="font-medium">50</span>
             </div>
             <div className="border-t border-rose-100 pt-2 mt-2 flex justify-between font-semibold">
-              <span>Kosten/Monat</span>
-              <span className="text-rose-600">€ 5.600</span>
+              <span>Kosten/Jahr</span>
+              <span className="text-rose-600">€ 8.000</span>
             </div>
           </div>
         </div>
@@ -347,20 +402,16 @@ function SlideROI() {
           <div className="text-xs font-semibold text-brand-600 uppercase tracking-wide mb-3">Mit JobRadar</div>
           <div className="space-y-2 text-sm text-ink-700">
             <div className="flex justify-between">
-              <span>Review-Zeit/Klient/Monat</span>
-              <span className="font-medium">0,5 Std</span>
+              <span>Review 60 Std/Jahr × €32</span>
+              <span className="font-medium">€ 1.920</span>
             </div>
             <div className="flex justify-between">
-              <span>Personalkosten</span>
-              <span className="font-medium">€ 200</span>
-            </div>
-            <div className="flex justify-between">
-              <span>JobRadar Pilot</span>
-              <span className="font-medium">€ 299</span>
+              <span>JobRadar Pilot/Jahr</span>
+              <span className="font-medium">€ 1.788</span>
             </div>
             <div className="border-t border-brand-200 pt-2 mt-2 flex justify-between font-semibold">
-              <span>Kosten/Monat</span>
-              <span className="text-brand-700">€ 499</span>
+              <span>Kosten/Jahr</span>
+              <span className="text-brand-700">€ 3.708</span>
             </div>
           </div>
         </div>
@@ -370,17 +421,17 @@ function SlideROI() {
           <div className="text-xs font-semibold text-accent-200 uppercase tracking-wide mb-3">Ersparnis</div>
           <div className="space-y-3">
             <div>
-              <div className="text-4xl font-bold">€ 5.101</div>
-              <div className="text-accent-200 text-sm">pro Monat gespart</div>
+              <div className="text-4xl font-bold">€ 4.292</div>
+              <div className="text-accent-200 text-sm">pro Jahr gespart</div>
             </div>
             <div className="border-t border-accent-500 pt-3 space-y-1">
               <div className="flex justify-between text-sm">
-                <span className="text-accent-200">Pro Jahr</span>
-                <span className="font-bold">€ 61.212</span>
+                <span className="text-accent-200">Zeitersparnis</span>
+                <span className="font-bold">15 Std / Monat</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-accent-200">ROI</span>
-                <span className="font-bold">+ 921 %</span>
+                <span className="text-accent-200">ROI auf Abo</span>
+                <span className="font-bold">+ 240 %</span>
               </div>
             </div>
           </div>
@@ -390,26 +441,26 @@ function SlideROI() {
       {/* Scale table */}
       <div className="rounded-2xl border border-ink-200 overflow-hidden">
         <div className="bg-ink-50 px-5 py-3 border-b border-ink-200">
-          <p className="text-xs font-semibold text-ink-500 uppercase tracking-wide">Ersparnis nach Klientenzahl</p>
+          <p className="text-xs font-semibold text-ink-500 uppercase tracking-wide">Ersparnis nach Berateranzahl (pro Jahr)</p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-ink-50/50">
-                <th className="px-4 py-2.5 text-left text-xs text-ink-500 font-semibold">Klienten</th>
-                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold">Manuell/Mo</th>
-                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold">JobRadar/Mo</th>
-                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold text-accent-700">Ersparnis/Mo</th>
+                <th className="px-4 py-2.5 text-left text-xs text-ink-500 font-semibold">Berater</th>
+                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold">Manuell/Jahr</th>
+                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold">JobRadar/Jahr</th>
+                <th className="px-4 py-2.5 text-right text-xs text-ink-500 font-semibold text-accent-700">Ersparnis/Jahr</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100">
               {[
-                { n: 10, manual: 5600, jr: 499, save: 5101 },
-                { n: 20, manual: 11200, jr: 499, save: 10701 },
-                { n: 50, manual: 28000, jr: 499, save: 27501 },
+                { n: 1, manual: 8000, jr: 3708, save: 4292 },
+                { n: 3, manual: 24000, jr: 9500, save: 14500 },
+                { n: 10, manual: 80000, jr: 23000, save: 57000 },
               ].map((r) => (
                 <tr key={r.n} className="hover:bg-ink-50/40">
-                  <td className="px-4 py-3 font-medium text-ink-800">{r.n} Klienten</td>
+                  <td className="px-4 py-3 font-medium text-ink-800">{r.n} Berater</td>
                   <td className="px-4 py-3 text-right text-rose-600 font-medium">€ {r.manual.toLocaleString('de-DE')}</td>
                   <td className="px-4 py-3 text-right text-brand-700 font-medium">€ {r.jr.toLocaleString('de-DE')}</td>
                   <td className="px-4 py-3 text-right font-bold text-accent-600">€ {r.save.toLocaleString('de-DE')}</td>
@@ -423,7 +474,109 @@ function SlideROI() {
   );
 }
 
-const SLIDE_CONTENT = [SlideProblem, SlideAutomation, SlideComparison, SlideROI];
+function SlideCoaching() {
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <div className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-600 uppercase tracking-wide mb-3">
+          Das eigentliche Problem
+        </div>
+        <h3 className="font-display text-2xl font-semibold text-ink-900">
+          Zeit für Suche — oder Zeit für Erfolg?
+        </h3>
+        <p className="text-ink-500 text-sm mt-1">Was ein Coach tun sollte vs. was er tatsächlich tut</p>
+      </div>
+
+      {/* Time split before / after */}
+      <div className="grid md:grid-cols-2 gap-5">
+        {/* Before */}
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">😓</span>
+            <span className="font-semibold text-ink-800">Ohne JobRadar</span>
+            <span className="ml-auto text-xs text-rose-600 font-medium bg-rose-100 px-2 py-0.5 rounded-full">Ist-Zustand</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { label: 'Stellensuche & Filtern', pct: 45, color: '#f43f5e' },
+              { label: 'Sortierung & Dokumentation', pct: 25, color: '#fb7185' },
+              { label: 'Klientgespräch & Beratung', pct: 20, color: '#fca5a5' },
+              { label: 'Interview-Vorbereitung', pct: 10, color: '#fecdd3' },
+            ].map((r) => (
+              <div key={r.label}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-ink-600">{r.label}</span>
+                  <span className="font-semibold text-ink-700">{r.pct} %</span>
+                </div>
+                <div className="h-4 w-full rounded-full bg-rose-100 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: r.color }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl bg-rose-600 px-4 py-3 text-white text-sm">
+            <strong>70 % der Arbeitszeit</strong> gehen für Suche &amp; Admin drauf —<br />
+            <span className="text-rose-200">kaum Zeit für echte Beratung</span>
+          </div>
+        </div>
+
+        {/* After */}
+        <div className="rounded-2xl border border-brand-200 bg-brand-50 p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🎯</span>
+            <span className="font-semibold text-ink-800">Mit JobRadar</span>
+            <span className="ml-auto text-xs text-brand-700 font-medium bg-brand-100 px-2 py-0.5 rounded-full">Soll-Zustand</span>
+          </div>
+          <div className="space-y-2">
+            {[
+              { label: 'Klientgespräch & Beratung', pct: 40, color: '#2563eb' },
+              { label: 'Interview-Vorbereitung', pct: 30, color: '#3b82f6' },
+              { label: 'Bewerbungs-Taktik & CV', pct: 20, color: '#60a5fa' },
+              { label: 'Report-Review (QA)', pct: 10, color: '#93c5fd' },
+            ].map((r) => (
+              <div key={r.label}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-ink-600">{r.label}</span>
+                  <span className="font-semibold text-ink-700">{r.pct} %</span>
+                </div>
+                <div className="h-4 w-full rounded-full bg-brand-100 overflow-hidden">
+                  <div className="h-full rounded-full" style={{ width: `${r.pct}%`, background: r.color }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-xl bg-brand-700 px-4 py-3 text-white text-sm">
+            <strong>90 % der Zeit</strong> für echtes Coaching —<br />
+            <span className="text-brand-200">höhere Vermittlungsquote, zufriedenere Klienten</span>
+          </div>
+        </div>
+      </div>
+
+      {/* What coaches can actually do */}
+      <div className="rounded-2xl border border-ink-200 bg-white p-5">
+        <div className="text-xs font-semibold text-ink-500 uppercase tracking-wide mb-3">
+          Was Coaches mit der gewonnenen Zeit tun können
+        </div>
+        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { icon: '🎯', title: 'Ziel-Analyse', desc: 'Realistisches Stellenprofil mit dem Klienten erarbeiten' },
+            { icon: '📝', title: 'CV-Taktik', desc: 'Lebenslauf auf konkrete Stellen aus dem Report anpassen' },
+            { icon: '🗣️', title: 'Interview-Training', desc: 'Vorbereitung auf typische Fragen der Zielbranche' },
+            { icon: '📈', title: 'Markt-Briefing', desc: 'Reale Marktlage aus dem JobRadar-Report direkt besprechen' },
+          ].map((a) => (
+            <div key={a.title} className="rounded-xl bg-ink-50 p-4">
+              <div className="text-2xl mb-2">{a.icon}</div>
+              <div className="font-semibold text-sm text-ink-800 mb-1">{a.title}</div>
+              <div className="text-xs text-ink-500 leading-snug">{a.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SLIDE_CONTENT = [SlideProblem, SlideAutomation, SlideComparison, SlideROI, SlideCoaching];
 
 /* ─── Carousel ───────────────────────────────────────────────────────────── */
 

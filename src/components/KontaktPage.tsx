@@ -50,16 +50,10 @@ export default function KontaktPage() {
 
           <div className="rounded-2xl border border-ink-200 bg-white p-6 md:p-8">
             <h2 className="font-display text-xl font-semibold text-ink-900 mb-1">Pilotanfrage senden</h2>
-            <p className="text-sm text-ink-500 mb-6">
+            <p className="text-sm text-ink-500 mb-4">
               Schreiben Sie uns per E-Mail — wir melden uns in der Regel innerhalb von 24 Stunden.
             </p>
-            <a
-              href="mailto:kontakt@kibrueg.de?subject=Pilotanfrage%20JobRadar%20Weiterbildung&body=Guten%20Tag%2C%0A%0Aich%20interessiere%20mich%20f%C3%BCr%20einen%20Piloten%20mit%20JobRadar%20Weiterbildung.%0A%0AEinrichtung%3A%20%0AKursbereich%3A%20%0ARückfragen%3A%20"
-              className="btn-primary inline-flex items-center gap-2 text-base px-6 py-3"
-            >
-              <Mail className="h-4 w-4" />
-              E-Mail öffnen
-            </a>
+            <p className="text-base font-semibold text-ink-900 select-all">kontakt@kibrueg.de</p>
             <p className="mt-4 text-xs text-ink-400">
               Datenschutzhinweis: Ihre Anfrage wird ausschließlich zur Bearbeitung und Kontaktaufnahme genutzt. Weitere Informationen in unserer{' '}
               <button
