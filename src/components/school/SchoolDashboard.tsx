@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { schoolFetch } from "@/hooks/useSchoolAuth";
 
-interface KPI { total: number; week: number; pending: number; avg_score: number }
+interface KPI { total: number; week: number; pending: number; avg_score: number; quota_used: number; quota_limit: number }
 interface Lead { id: number; title: string; provider: string; score: number; school_status: string; updated_at: string }
 interface DashboardData { kpi: KPI; recent_leads: Lead[] }
 
@@ -56,6 +56,40 @@ export default function SchoolDashboard() {
         <KPICard label="Ausstehend" value={kpi?.pending ?? 0} sub="noch nicht bewertet" />
         <KPICard label="Ø Fit-Score" value={kpi?.avg_score ? `${kpi.avg_score}%` : "–"} />
       </div>
+
+      {/* Quota bar */}
+      {kpi && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Kontingent: {kpi.quota_used} / {kpi.quota_limit} Stellen
+            </p>
+            <a
+              href="/api/school/report.pdf"
+              className="text-xs text-blue-600 hover:underline dark:text-blue-400 flex items-center gap-1"
+            >
+              ↓ PDF-Report
+            </a>
+          </div>
+          <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+            <div
+              className={`h-2 rounded-full transition-all ${
+                kpi.quota_used / kpi.quota_limit >= 0.9
+                  ? "bg-red-500"
+                  : kpi.quota_used / kpi.quota_limit >= 0.7
+                  ? "bg-yellow-400"
+                  : "bg-green-500"
+              }`}
+              style={{ width: `${Math.min(100, Math.round(kpi.quota_used / kpi.quota_limit * 100))}%` }}
+            />
+          </div>
+          {kpi.quota_used >= kpi.quota_limit && (
+            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+              Kontingent ausgeschöpft — neue Stellen werden erst nach Erweiterung zugewiesen.
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">

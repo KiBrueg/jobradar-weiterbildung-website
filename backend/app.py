@@ -22,7 +22,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 import psycopg2.extras
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -369,6 +369,7 @@ def init_db() -> None:
             "portal_valid_until": "TEXT DEFAULT 'Pilotphase · monatlich kuendbar'",
             "portal_note": "TEXT DEFAULT ''",
             "portal_password": "TEXT DEFAULT ''",
+            "job_quota": "INTEGER DEFAULT 50",
         }
         for col, ddl in portal_migrations.items():
             if col not in school_cols:
@@ -1180,21 +1181,29 @@ def approve_lead(lead_id: int, body: dict) -> dict:
     exec_sql("UPDATE leads SET status='Approved',updated_at=? WHERE id=?", (now(), lead_id))
     exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
     notification_count = 0
+    quota_exceeded: list[dict] = []
     if school_ids:
         for sid in school_ids:
             school_id = int(sid)
+            school_row = one("SELECT name, COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
+            if school_row:
+                used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+                limit = int(school_row.get("job_quota") or 50)
+                if used >= limit:
+                    quota_exceeded.append({"school_id": school_id, "name": school_row["name"], "used": used, "limit": limit})
+                    continue
             exec_sql(
                 "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
                 (lead_id, school_id, note, now()))
             notification_count += _notify_school_new_lead(lead_id, school_id, note)
-        assigned = len(school_ids)
+        assigned = len(school_ids) - len(quota_exceeded)
     else:
         exec_sql(
             "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,NULL,?,?)",
             (lead_id, note, now()))
         assigned = 0
         notification_count = _notify_school_new_lead(lead_id, None, note)
-    return {"ok": True, "assigned_to": assigned, "notification_count": notification_count}
+    return {"ok": True, "assigned_to": assigned, "notification_count": notification_count, "quota_exceeded": quota_exceeded}
 
 
 @app.post("/api/leads/{lead_id}/reject")
@@ -1588,7 +1597,7 @@ def admin_schools_page(request: Request):
 <section class='card'><h2>Neue Schule</h2><form method='post' action='/admin/schools' class='grid2'>
 <label>Schulname<input name='name' required></label><label>Website<input name='website' placeholder='https://...'></label>
 <label>Kontakt E-Mail<input name='contact_email' type='email'></label><label>Status<select name='status'><option>lead</option><option selected>active</option><option>risk</option><option>archived</option></select></label>
-<label>Portal Plan<input name='portal_plan' value='Pilot Portal'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='49'></label>
+<label>Portal Plan<input name='portal_plan' value='Pilot Portal'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='49'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='50'></label>
 <label class='wide'>Notiz<textarea name='note' rows='3'></textarea></label><label><input type='checkbox' name='portal_enabled' value='1' checked> Portal aktivieren + Token erzeugen</label>
 <div class='actions wide'><button class='primary'>Schule anlegen</button></div></form></section>
 <section class='card'><h2>Bestehende Schulen</h2><table><thead><tr><th>Schule</th><th>Email</th><th>Status</th><th>Kurse/Profile</th><th>Portal</th><th></th></tr></thead><tbody>{body}</tbody></table></section>
@@ -1649,7 +1658,7 @@ def admin_school_detail(school_id: int, request: Request):
 <section class='card'><h2>Schule bearbeiten</h2><form method='post' action='/admin/schools/{school_id}' class='grid2'>
 <label>Schulname<input name='name' value='{e(school['name'])}' required></label><label>Website<input name='website' value='{e(school.get('website',''))}'></label>
 <label>Kontakt E-Mail<input name='contact_email' type='email' value='{e(school.get('contact_email',''))}'></label><label>Status<select name='status'>{status_options(school.get('status'))}</select></label>
-<label>Portal Plan<input name='portal_plan' value='{e(school.get('portal_plan','Pilot Portal'))}'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='{e(school.get('portal_price_eur') or 49)}'></label>
+<label>Portal Plan<input name='portal_plan' value='{e(school.get('portal_plan','Pilot Portal'))}'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='{e(school.get('portal_price_eur') or 49)}'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='{e(school.get('job_quota') or 50)}'></label>
 <label>Portal valid until<input name='portal_valid_until' value='{e(school.get('portal_valid_until',''))}'></label><label><input type='checkbox' name='portal_enabled' value='1' {'checked' if int(school.get('portal_enabled') or 0) else ''}> Portal aktiv</label>
 <label class='wide'>Portal note<textarea name='portal_note' rows='2'>{e(school.get('portal_note',''))}</textarea></label><label class='wide'>Interne Notiz<textarea name='note' rows='3'>{e(school.get('note',''))}</textarea></label>
 <div class='actions wide'><button class='primary'>Schule speichern</button></div></form>
@@ -1670,12 +1679,13 @@ def admin_school_detail(school_id: int, request: Request):
 def admin_update_school(
     school_id: int, name: str = Form(...), website: str = Form(""), contact_email: str = Form(""), status: str = Form("active"),
     note: str = Form(""), portal_plan: str = Form("Pilot Portal"), portal_price_eur: float = Form(49), portal_valid_until: str = Form(""),
-    portal_note: str = Form(""), portal_enabled: str | None = Form(default=None),
+    portal_note: str = Form(""), portal_enabled: str | None = Form(default=None), job_quota: int = Form(50),
 ):
     if not one("SELECT id FROM schools WHERE id=?", (school_id,)):
         raise HTTPException(404, "school not found")
-    exec_sql("""UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,portal_enabled=?,portal_plan=?,portal_price_eur=?,portal_valid_until=?,portal_note=?,updated_at=? WHERE id=?""",
-             (name.strip(), website.strip(), contact_email.strip(), status.strip(), note.strip(), 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur, portal_valid_until.strip(), portal_note.strip(), now(), school_id))
+    quota = max(1, job_quota)
+    exec_sql("""UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,portal_enabled=?,portal_plan=?,portal_price_eur=?,portal_valid_until=?,portal_note=?,job_quota=?,updated_at=? WHERE id=?""",
+             (name.strip(), website.strip(), contact_email.strip(), status.strip(), note.strip(), 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur, portal_valid_until.strip(), portal_note.strip(), quota, now(), school_id))
     exec_sql("UPDATE courses SET provider=?,updated_at=? WHERE school_id=?", (name.strip(), now(), school_id))
     return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
 
@@ -2329,12 +2339,16 @@ async def school_dashboard(request: Request):
              WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
         (school_id,),
     )
+    quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
+    job_quota = int((quota_row or {}).get("job_quota") or 50)
     return {
         "kpi": {
             "total": total,
             "week": week,
             "pending": pending,
             "avg_score": avg_row["a"] if avg_row else 0,
+            "quota_used": total,
+            "quota_limit": job_quota,
         },
         "recent_leads": recent,
     }
@@ -2403,6 +2417,142 @@ async def school_job_status(request: Request, lead_id: int):
         (status, note, now(), lead_id),
     )
     return {"ok": True}
+
+
+@app.get("/api/school/quota")
+async def school_quota(request: Request):
+    school_id = int(request.state.school["id"])
+    used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
+    limit = int((quota_row or {}).get("job_quota") or 50)
+    return {"used": used, "limit": limit, "pct": round(used / limit * 100) if limit else 0}
+
+
+@app.get("/api/school/report.pdf")
+async def school_report_pdf(request: Request):
+    """Generate a PDF report of all leads assigned to this school."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+
+    school = request.state.school
+    school_id = int(school["id"])
+    school_name = school.get("name", "Schule")
+
+    leads_data = rows(
+        """SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit, l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=?
+             ORDER BY l.score DESC""",
+        (school_id,),
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
+    story = []
+
+    story.append(Paragraph(f"JobRadar — Stellenreport", styles["Title"]))
+    story.append(Paragraph(f"{school_name} · Stand: {datetime.utcnow().strftime('%d.%m.%Y')}", styles["Normal"]))
+    story.append(Spacer(1, 0.5*cm))
+
+    if not leads_data:
+        story.append(Paragraph("Noch keine Stellen zugewiesen.", styles["Normal"]))
+    else:
+        STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
+        table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
+        for lead in leads_data:
+            table_data.append([
+                Paragraph(lead.get("title") or "", small),
+                Paragraph(lead.get("provider") or "", small),
+                f"{lead.get('score') or 0}%",
+                STATUS_DE.get(lead.get("school_status") or "new", "Neu"),
+                (lead.get("updated_at") or "")[:10],
+            ])
+        col_widths = [7*cm, 4*cm, 1.8*cm, 2.5*cm, 2.2*cm]
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph(f"Gesamt: {len(leads_data)} Stellen", styles["Normal"]))
+
+    story.append(Spacer(1, cm))
+    story.append(Paragraph("Erstellt von JobRadar Weiterbildung · Nicht zur externen Weitergabe.", small))
+
+    doc.build(story)
+    buf.seek(0)
+    filename = f"jobradar-report-{datetime.utcnow().strftime('%Y-%m-%d')}.pdf"
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.post("/api/admin/schools/{school_id}/send-digest")
+async def admin_send_school_digest(school_id: int, request: Request):
+    """Send weekly digest notification for a school via the existing webhook."""
+    school = one("SELECT id,name,contact_email,portal_token FROM schools WHERE id=? AND status<>'archived'", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    week_new = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return {"ok": False, "message": "no webhook configured"}
+    email = (school.get("contact_email") or "").strip()
+    if not email:
+        return {"ok": False, "message": "school has no contact email"}
+    portal_url = f"{PUBLIC_BASE_URL}/school/{school['portal_token']}" if school.get("portal_token") else PUBLIC_BASE_URL
+    payload = {
+        "event": "weekly_digest",
+        "school_id": school_id,
+        "school_name": school["name"],
+        "to_email": email,
+        "subject": f"JobRadar Wochenzusammenfassung: {week_new} neue Stelle{'n' if week_new != 1 else ''}",
+        "new_this_week": week_new,
+        "total": total,
+        "portal_url": portal_url,
+    }
+    import urllib.request as _ur
+    try:
+        req = _ur.Request(webhook, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+        _record_notification("weekly_digest", 0, school_id, email, "sent")
+        return {"ok": True, "new_this_week": week_new, "total": total}
+    except Exception as exc:
+        _record_notification("weekly_digest", 0, school_id, email, "error", str(exc))
+        return {"ok": False, "message": str(exc)}
+
+
+@app.post("/api/admin/schools/send-digest-all")
+async def admin_send_digest_all(request: Request):
+    """Send weekly digest to all active schools with email and portal access."""
+    active = rows(
+        """SELECT id FROM schools WHERE status<>'archived' AND portal_enabled=1
+             AND COALESCE(contact_email,'')<>''"""
+    )
+    results = []
+    for s in active:
+        r = await admin_send_school_digest(int(s["id"]), request)
+        results.append({"school_id": s["id"], **r})
+    return {"sent": sum(1 for r in results if r.get("ok")), "total": len(results), "details": results}
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
