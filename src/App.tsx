@@ -11,6 +11,8 @@ import { ToastProvider } from '@/components/Toast';
 import SchoolLoginPage from '@/components/school/SchoolLoginPage';
 import SchoolLayout from '@/components/school/SchoolLayout';
 import SchoolDashboard from '@/components/school/SchoolDashboard';
+import SchoolJobsPage from '@/components/school/SchoolJobsPage';
+import SchoolProfilePage from '@/components/school/SchoolProfilePage';
 import { getSchoolUser } from '@/hooks/useSchoolAuth';
 
 type Route =
@@ -80,9 +82,9 @@ function SchoolRouter() {
       }}
     >
       {route === 'school-dashboard' && <SchoolDashboard />}
-      {route === 'school-jobs'      && <div className="text-gray-400 py-8 text-center">Stellen — Sprint 3</div>}
-      {route === 'school-profile'   && <div className="text-gray-400 py-8 text-center">Profil — Sprint 4</div>}
-      {route === 'school-reports'   && <div className="text-gray-400 py-8 text-center">Berichte — Sprint 5</div>}
+      {route === 'school-jobs'      && <SchoolJobsPage />}
+      {route === 'school-profile'   && <SchoolProfilePage />}
+      {route === 'school-reports'   && <div className="text-gray-400 py-8 text-center">Berichte — demnächst verfügbar</div>}
     </SchoolLayout>
   );
 }
