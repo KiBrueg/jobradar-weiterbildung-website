@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Radar, ArrowRight } from 'lucide-react';
-import { goLanding, goReferenzen, goSchulportalDemo } from '@/App';
+import { goLanding, goReferenzen, goSchool, goSchulportalDemo } from '@/App';
 
 const navItems = [
   { label: 'Produkt', route: 'landing' as const },
@@ -56,7 +56,7 @@ export default function PublicHeader() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <button onClick={() => goSchulportalDemo()} className="btn-primary">
+            <button onClick={() => goSchool()} className="btn-primary">
               Schulportal
               <ArrowRight className="h-4 w-4" />
             </button>

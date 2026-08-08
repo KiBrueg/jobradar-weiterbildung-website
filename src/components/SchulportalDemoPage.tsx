@@ -1,5 +1,5 @@
-import { ArrowLeft, LayoutDashboard, Star, Clock, CheckCircle2, AlertCircle, BookOpen } from 'lucide-react';
-import { goLanding } from '@/App';
+import { ArrowLeft, LayoutDashboard, Star, Clock, CheckCircle2, AlertCircle, BookOpen, ArrowRight, LogIn } from 'lucide-react';
+import { goLanding, goKontakt, goSchool } from '@/App';
 import PublicHeader from '@/components/PublicHeader';
 import PublicFooter from '@/components/PublicFooter';
 
@@ -134,6 +134,26 @@ export default function SchulportalDemoPage() {
 
           <div className="px-6 py-4 border-t border-ink-100 bg-ink-50/40 text-xs text-ink-400 text-center">
             Im echten Portal: direkte Links, Coach-Notizen, Freigabe-Funktion, CSV-Export und wöchentliche Benachrichtigungen.
+          </div>
+        </div>
+
+        {/* CTA */}
+        <div className="mt-8 rounded-2xl border border-brand-200 bg-brand-50 px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-ink-900">Zugang zur echten Version anfragen</h3>
+            <p className="mt-1 text-sm text-ink-600 max-w-md">
+              Im Pilot richtet jede Schule ein eigenes Kurs­profil ein und sieht nur die eigenen Treffer — mit Freigabe-Funktion und wöchentlichem Report.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center gap-3 shrink-0">
+            <button onClick={goKontakt} className="btn-primary px-5 py-2.5">
+              Pilot anfragen
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            <button onClick={goSchool} className="btn-ghost px-4 py-2.5 flex items-center gap-2 text-ink-500 text-sm">
+              <LogIn className="h-4 w-4" />
+              Bereits Zugang?
+            </button>
           </div>
         </div>
       </main>
