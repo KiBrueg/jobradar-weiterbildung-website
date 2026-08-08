@@ -1,11 +1,11 @@
 import { CheckCircle2, Info, ShieldCheck } from 'lucide-react';
 
 const checklist = [
-  'Noch keine veroeffentlichten Kundenbewertungen',
-  'Pilot-Feedback wird nach Freigabe ergaenzt',
+  'Noch keine Kundenbewertungen online',
+  'Pilot-Feedback wird nach Freigabe eingebunden',
   'Keine erfundenen Google Reviews',
   'Referenzen nur mit Zustimmung',
-  'Kundenstimmen koennen anonymisiert dargestellt werden',
+  'Kundenstimmen sind anonymisiert darstellbar',
 ];
 
 export default function FeedbackStatusCard() {
@@ -37,7 +37,7 @@ export default function FeedbackStatusCard() {
       <div className="mt-6 rounded-xl bg-brand-50/60 border border-brand-100 p-4 flex items-start gap-3">
         <Info className="h-4.5 w-4.5 text-brand-600 shrink-0 mt-0.5" />
         <p className="text-sm text-brand-900 leading-relaxed">
-          Diese Seite ist bewusst vorbereitet, ohne Bewertungen zu erfinden. Sobald echte Pilotprojekte abgeschlossen sind, koennen freigegebene Aussagen hier ergaenzt werden.
+          Diese Seite ist bewusst vorbereitet, ohne Bewertungen zu erfinden. Sobald echte Pilotprojekte abgeschlossen sind, werden freigegebene Aussagen eingebunden.
         </p>
       </div>
     </div>

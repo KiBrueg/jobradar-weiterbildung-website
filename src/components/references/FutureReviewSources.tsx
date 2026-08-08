@@ -5,25 +5,25 @@ const sources = [
   {
     icon: Star,
     title: 'Google Unternehmensprofil',
-    text: 'Sobald ein oeffentliches Unternehmensprofil und echte Bewertungen vorhanden sind, koennen ausgewaehlte Bewertungen verlinkt oder sauber eingebunden werden.',
+    text: 'Sobald ein Unternehmensprofil im Web und echte Bewertungen vorhanden sind, sind passende Bewertungen einbindbar.',
     accent: 'brand' as const,
   },
   {
     icon: ClipboardList,
     title: 'Pilotprojekt-Feedback',
-    text: 'Nach einem Testlauf mit Bildungstraegern koennen freigegebene Aussagen als Kundenstimmen ergaenzt werden.',
+    text: 'Nach einem Testlauf mit Einrichtungen werden freigegebene Aussagen als Kundenstimmen eingebunden.',
     accent: 'accent' as const,
   },
   {
     icon: FileText,
     title: 'Case Studies',
-    text: 'Kurze Fallstudien pro Kursprofil: Ausgangslage, Rechercheumfang, gefundene Stellen, Nutzen fuer Coaching.',
+    text: 'Kurze Fallstudien pro Kursprofil: Ausgangslage, Rechercheumfang, gefundene Stellen, Nutzen im Coaching.',
     accent: 'cyanx' as const,
   },
   {
     icon: BarChart3,
     title: 'Interne Evaluation',
-    text: 'Feedback von Coaches und Kurskoordination zu Relevanz, Zeitersparnis und Reportqualitaet.',
+    text: 'Feedback von Coaches und Kurskoordination zu Relevanz, Zeitersparnis und Report-Qualität.',
     accent: 'ink' as const,
   },
 ];

@@ -20,7 +20,7 @@ export default function CaseStudyTemplate() {
           <FileText className="h-5 w-5" />
         </span>
         <div className="flex-1">
-          <PlaceholderBanner>Template — noch nicht veroeffentlicht</PlaceholderBanner>
+          <PlaceholderBanner>Template — noch nicht online</PlaceholderBanner>
           <h3 className="mt-2 font-display text-lg font-semibold text-ink-900">
             Data Analyst Weiterbildung — Arbeitsmarkt-Radar Pilot
           </h3>
@@ -37,7 +37,7 @@ export default function CaseStudyTemplate() {
       </dl>
 
       <p className="mt-5 text-xs text-ink-500 leading-relaxed">
-        Zahlen und Aussagen werden erst nach einem echten Pilotlauf veroeffentlicht.
+        Zahlen und Aussagen werden erst nach einem echten Pilotlauf online gestellt.
       </p>
     </div>
   );

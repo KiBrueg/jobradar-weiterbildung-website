@@ -3,8 +3,8 @@ import { Radar, ArrowRight } from 'lucide-react';
 import { goLanding, goReferenzen, goSchool } from '@/App';
 
 const navItems = [
-  { label: 'Loesung', route: 'landing' as const },
-  { label: 'Fuer Bildungstraeger', route: 'landing' as const },
+  { label: 'Produkt', route: 'landing' as const },
+  { label: 'Anbieter', route: 'landing' as const },
   { label: 'Ablauf', route: 'landing' as const },
   { label: 'Referenzen', route: 'referenzen' as const },
   { label: 'Schulportal', route: 'school' as const },
@@ -63,7 +63,7 @@ export default function PublicHeader() {
             <button
               onClick={() => setMobileNav((v) => !v)}
               className="md:hidden btn-ghost px-2"
-              aria-label={mobileNav ? 'Menue schliessen' : 'Menue oeffnen'}
+              aria-label={mobileNav ? 'Navigation schliessen' : 'Navigation aufrufen'}
               aria-expanded={mobileNav}
               aria-controls="mobile-nav-public"
             >

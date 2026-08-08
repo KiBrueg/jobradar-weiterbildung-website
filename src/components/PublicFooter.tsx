@@ -10,7 +10,7 @@ import {
 } from '@/App';
 
 const links = [
-  { label: 'Uebersicht', action: goLanding, path: '/' },
+  { label: 'Start', action: goLanding, path: '/' },
   { label: 'Referenzen', action: goReferenzen, path: '/referenzen' },
   { label: 'Schulportal', action: goSchool, path: '/school' },
   { label: 'Impressum', action: goImpressum, path: '/impressum' },
@@ -36,7 +36,7 @@ export default function PublicFooter() {
               </span>
               <span className="font-display text-[15px] font-semibold text-ink-900">JobRadar Weiterbildung</span>
             </button>
-            <p className="mt-3 text-sm text-ink-500">KI-gestuetzt, menschlich geprueft.</p>
+            <p className="mt-3 text-sm text-ink-500">KI-Analyse, menschliche QA.</p>
           </div>
           <nav className="flex flex-wrap gap-6 text-sm" aria-label="Seitennavigation">
             {links.map((l) => (

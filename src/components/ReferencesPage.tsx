@@ -20,20 +20,20 @@ import FeedbackFormMockup from '@/components/references/FeedbackFormMockup';
 import CaseStudyTemplate from '@/components/references/CaseStudyTemplate';
 
 const navItems = [
-  { label: 'Loesung', route: 'landing' as const },
-  { label: 'Fuer Bildungstraeger', route: 'landing' as const },
+  { label: 'Produkt', route: 'landing' as const },
+  { label: 'Anbieter', route: 'landing' as const },
   { label: 'Ablauf', route: 'landing' as const },
   { label: 'Referenzen', route: 'referenzen' as const },
   { label: 'Schulportal', route: 'school' as const },
 ];
 
 const categories = [
-  { icon: Clock, title: 'Zeitersparnis fuer Coaches', desc: 'Wie stark reduziert JobRadar manuelle Recherchezeit pro Kursprofil?' },
-  { icon: Target, title: 'Relevanz der gefundenen Stellen', desc: 'Wie passgenau sind die empfohlenen Stellen zum Kursprofil?' },
-  { icon: ShieldX, title: 'Qualitaet der Ausschluesse / Red Flags', desc: 'Wie zuverlaessig werden ungeeignete Stellen herausgefiltert?' },
-  { icon: FileCheck, title: 'Nutzen fuer Arbeitsmarktnachweis', desc: 'Wie gut lassen sich Reports fuer AZAW-/Bildungsgutschein-Nachweise verwenden?' },
-  { icon: FileBarChart, title: 'Verstaendlichkeit der Reports', desc: 'Sind die woechentlichen Reports fuer Coaches und Leitung schnell erfassbar?' },
-  { icon: ClipboardCheck, title: 'Umsetzbarkeit im Bewerbungscoaching', desc: 'Wie gut lassen sich Empfehlungen in konkrete Bewerbungsziele uebersetzen?' },
+  { icon: Clock, title: 'Zeitgewinn Coaches', desc: 'Wie stark reduziert JobRadar manuelle Recherchezeit pro Kursprofil?' },
+  { icon: Target, title: 'Relevanz der Stellen', desc: 'Wie passgenau sind die empfohlenen Stellen zum Kursprofil?' },
+  { icon: ShieldX, title: 'Treffsicherheit / Red Flags', desc: 'Wie sicher werden ungeeignete Stellen herausgefiltert?' },
+  { icon: FileCheck, title: 'Arbeitsmarktnachweis', desc: 'Wie gut lassen sich Reports zur AZAV-/Bildungsgutschein-Dokumentation nutzen?' },
+  { icon: FileBarChart, title: 'Lesbarkeit der Reports', desc: 'Sind die laufenden Reports von Coaches und Leitung schnell erfassbar?' },
+  { icon: ClipboardCheck, title: 'Einsatz im Bewerbungscoaching', desc: 'Wie gut lassen sich Empfehlungen in konkrete Bewerbungsziele umwandeln?' },
 ];
 
 const placeholders = [
@@ -81,7 +81,7 @@ export default function ReferencesPage() {
               <button
                 onClick={() => setMobileNav((v) => !v)}
                 className="md:hidden btn-ghost px-2"
-                aria-label={mobileNav ? 'Menue schliessen' : 'Menue oeffnen'}
+                aria-label={mobileNav ? 'Navigation schliessen' : 'Navigation aufrufen'}
                 aria-expanded={mobileNav}
                 aria-controls="mobile-nav-references"
               >
@@ -131,11 +131,11 @@ export default function ReferencesPage() {
               Feedback transparent vorbereiten — <span className="text-brand-700">ohne Fake Reviews</span>
             </h1>
             <p className="mt-6 text-lg text-ink-600 leading-relaxed max-w-2xl animate-fade-up" style={{ animationDelay: '120ms' }}>
-              JobRadar Weiterbildung befindet sich in der Pilotphase. Diese Seite ist vorbereitet, um spaeter echte Kundenstimmen, Google-Bewertungen oder Projekt-Feedback sauber und nachvollziehbar einzubinden.
+              JobRadar Weiterbildung befindet sich in der Pilotphase. Diese Seite ist vorbereitet, um nach Pilotabschluss echte Kundenstimmen, Google-Bewertungen oder Projekt-Feedback sauber und nachvollziehbar einzubinden.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
               <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
-                Pilotgespraech anfragen
+                Pilottermin anfragen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
               <button onClick={() => document.getElementById('fallstudie')?.scrollIntoView({ behavior: 'smooth' })} className="btn-secondary text-base px-5 py-3">
@@ -143,7 +143,7 @@ export default function ReferencesPage() {
               </button>
             </div>
             <p className="mt-5 text-sm text-ink-500 animate-fade-up" style={{ animationDelay: '240ms' }}>
-              Transparenz ist wichtiger als kuenstliche 5-Sterne-Optik.
+              Transparenz ist wichtiger als unechte 5-Sterne-Optik.
             </p>
           </div>
         </div>
@@ -154,7 +154,7 @@ export default function ReferencesPage() {
         <SectionHeading
           eyebrow="Status"
           title="Aktueller Stand"
-          subtitle="Diese Seite ist bewusst ohne Bewertungen vorbereitet. Sobald echte Pilotprojekte abgeschlossen sind, werden freigegebene Aussagen ergaenzt."
+          subtitle="Diese Seite ist bewusst ohne Bewertungen vorbereitet. Sobald echte Pilotprojekte abgeschlossen sind, werden freigegebene Aussagen eingebunden."
         />
         <FeedbackStatusCard />
       </PageSection>
@@ -164,8 +164,8 @@ export default function ReferencesPage() {
         <PageSection>
           <SectionHeading
             eyebrow="Nachweise"
-            title="Welche Nachweise spaeter eingebunden werden koennen"
-            subtitle="Vier Quellen, aus denen nach Pilotabschluss echte Referenzen entstehen koennen."
+            title="Welche Nachweise danach eingebunden werden"
+            subtitle="Vier Quellen, aus denen nach Pilotabschluss echte Referenzen entstehen."
           />
           <FutureReviewSources />
         </PageSection>
@@ -175,8 +175,8 @@ export default function ReferencesPage() {
       <PageSection>
         <SectionHeading
           eyebrow="Messung"
-          title="Welche Rueckmeldungen wir spaeter messen"
-          subtitle="Keine Testimonials, sondern Kategorien, in denen Pilot-Feedback spaeter strukturiert erfasst wird."
+          title="Was wir danach messen"
+          subtitle="Keine Testimonials, sondern Kategorien, in denen Pilot-Feedback strukturiert erfasst wird."
         />
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {categories.map((c, i) => (
@@ -196,7 +196,7 @@ export default function ReferencesPage() {
         <PageSection>
           <SectionHeading
             eyebrow="Layout"
-            title="So werden Kundenstimmen spaeter aussehen"
+            title="So sehen Kundenstimmen danach aus"
             subtitle="Jede Karte ist klar als Platzhalter markiert — keine echte Kundenstimme."
           />
           <div className="grid md:grid-cols-3 gap-5">
@@ -217,7 +217,7 @@ export default function ReferencesPage() {
             ))}
           </div>
           <p className="mt-6 text-xs text-ink-500">
-            Nach Pilotprojekten koennen echte Aussagen mit Freigabe anonymisiert oder namentlich ergaenzt werden.
+            Nach Pilotprojekten werden echte Aussagen mit Freigabe anonymisiert oder namentlich eingebunden.
           </p>
         </PageSection>
       </section>
@@ -227,7 +227,7 @@ export default function ReferencesPage() {
         <SectionHeading
           eyebrow="Formular"
           title="Feedback vorbereiten"
-          subtitle="Demo-Formular fuer spaetere Pilotprojekte. Daten bleiben nur im Browser."
+          subtitle="Demo-Formular zur Vorbereitung. Daten bleiben nur im Browser."
         />
         <FeedbackFormMockup />
       </PageSection>
@@ -237,8 +237,8 @@ export default function ReferencesPage() {
         <PageSection>
           <SectionHeading
             eyebrow="Template"
-            title="So koennte eine spaetere Case Study aussehen"
-            subtitle="Struktur ist vorbereitet — Zahlen und Aussagen werden erst nach einem echten Pilotlauf veroeffentlicht."
+            title="So kann eine Case Study aussehen"
+            subtitle="Struktur ist vorbereitet — Zahlen und Aussagen werden erst nach einem echten Pilotlauf online gestellt."
           />
           <CaseStudyTemplate />
         </PageSection>
