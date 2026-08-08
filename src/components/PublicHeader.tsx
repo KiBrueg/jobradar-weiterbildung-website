@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Radar, ArrowRight } from 'lucide-react';
-import { goLanding, goReferenzen, goSchool } from '@/App';
+import { goLanding, goReferenzen, goSchulportalDemo } from '@/App';
 
 const navItems = [
   { label: 'Produkt', route: 'landing' as const },
@@ -28,7 +28,7 @@ export default function PublicHeader() {
     setMobileNav(false);
     if (n.route === 'landing') goLanding();
     else if (n.route === 'referenzen') goReferenzen();
-    else if (n.route === 'school') goSchool();
+    else if (n.route === 'school') goSchulportalDemo();
   };
 
   return (
@@ -56,7 +56,7 @@ export default function PublicHeader() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <button onClick={() => goSchool()} className="btn-primary">
+            <button onClick={() => goSchulportalDemo()} className="btn-primary">
               Schulportal
               <ArrowRight className="h-4 w-4" />
             </button>
