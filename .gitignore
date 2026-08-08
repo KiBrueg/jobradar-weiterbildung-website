@@ -21,3 +21,8 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+.claude/
+sessions/
+NEXT_SESSION.md
+outputs/
