@@ -18,15 +18,15 @@ import {
   Quote,
   PlayCircle,
 } from 'lucide-react';
-import { goKontakt, goReferenzen, goSchool } from '@/App';
+import { goKontakt, goReferenzen, goSchool, goBeispielReport, goSchulportalDemo } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 import ComparisonCarousel from '@/components/ComparisonCarousel';
 
 const navItems = [
   { label: 'Demo', href: '#demo', action: 'scroll' as const },
-  { label: 'Loesung', href: '#loesung', action: 'scroll' as const },
-  { label: 'Fuer Bildungstraeger', href: '#bildungstraeger', action: 'scroll' as const },
+  { label: 'Produkt', href: '#loesung', action: 'scroll' as const },
+  { label: 'Anbieter', href: '#bildungstraeger', action: 'scroll' as const },
   { label: 'Ablauf', href: '#ablauf', action: 'scroll' as const },
   { label: 'Referenzen', href: '', action: 'referenzen' as const },
 ];
@@ -50,17 +50,17 @@ const solutions = [
 const steps = [
   { icon: School, title: 'Schule anlegen', desc: 'Anbieter erfassen, Kontakt und AZAV-Status hinterlegen.' },
   { icon: BookOpen, title: 'Kurse definieren', desc: 'Kursprofile mit Thema, Status und Dokumenten anlegen.' },
-  { icon: Search, title: 'Suchprofil pflegen', desc: 'Zielberufe, Skills, Ausschluesse und Quellen festlegen.' },
-  { icon: FileBarChart, title: 'Leads & Reports pruefen', desc: 'Gefundene Stellen pruefen, freigeben und exportieren.' },
+  { icon: Search, title: 'Suchprofil pflegen', desc: 'Zielberufe, Skills, Filter und Quellen festlegen.' },
+  { icon: FileBarChart, title: 'Leads & Reports', desc: 'Gefundene Stellen ansehen, freigeben und exportieren.' },
 ];
 
 const flow = ['School', 'Courses', 'Search Profile', 'Job Leads', 'Reports'];
 
 const benefits = [
-  { icon: Users, title: 'Fuer Coaches', desc: 'Weniger Recherche, bessere Vorbereitung auf Beratungsgespraeche.' },
-  { icon: LineChart, title: 'Fuer Management', desc: 'Reports und Nachweise pro Kurs und Schule, jederzeit exportierbar.' },
-  { icon: Building2, title: 'Fuer Schulen', desc: 'Skalierbare Kurs- und Arbeitsmarktanalyse ueber alle Standorte.' },
-  { icon: GraduationCap, title: 'Fuer Teilnehmende', desc: 'Realistischere Bewerbungsziele, passgenau zum Kursprofil.' },
+  { icon: Users, title: 'Coaches', desc: 'Weniger Recherche, mehr Zeit pro Beratung.' },
+  { icon: LineChart, title: 'Management', desc: 'Reports und Nachweise pro Kurs und Schule, jederzeit exportierbar.' },
+  { icon: Building2, title: 'Schulen', desc: 'Skalierbare Kurs- und Arbeitsmarktanalyse an allen Standorten.' },
+  { icon: GraduationCap, title: 'Teilnehmende', desc: 'Realistischere Bewerbungsziele, passgenau zum Kursprofil.' },
 ];
 
 const kpis = [
@@ -156,25 +156,25 @@ export default function LandingPage() {
           <div className="max-w-3xl">
             <span className="inline-flex items-center gap-2 rounded-full border border-ink-200 bg-white/80 px-3.5 py-1.5 text-xs font-semibold text-ink-600 shadow-soft animate-fade-up">
               <Sparkles className="h-3.5 w-3.5 text-brand-600" />
-              Kursbezogener Arbeitsmarkt-Radar fuer Bildungstraeger
+              Kursbezogener Arbeitsmarkt-Radar
             </span>
             <h1 className="mt-6 font-display text-4xl sm:text-5xl md:text-6xl font-semibold tracking-tight text-ink-900 text-balance leading-[1.05] animate-fade-up" style={{ animationDelay: '60ms' }}>
-              Arbeitsmarkt-Radar fuer <span className="text-brand-700">Weiterbildungskurse</span>
+              Arbeitsmarkt-Radar: <span className="text-brand-700">Weiterbildungskurse</span>
             </h1>
             <p className="mt-6 text-lg text-ink-600 leading-relaxed max-w-2xl animate-fade-up" style={{ animationDelay: '120ms' }}>
-              JobRadar verbindet Kursprofile mit realistischen Zielberufen, passenden Stellen und woechentlichen Reports — damit Coaches mehr Zeit fuer Beratung haben.
+              JobRadar verbindet Kursprofile mit realistischen Zielberufen, passenden Stellen und laufenden Reports — damit Coaches mehr Zeit zur Beratung haben.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
+              <button onClick={() => goSchulportalDemo()} className="btn-primary text-base px-5 py-3">
                 Schulportal ansehen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
-              <button onClick={() => toast('Beispiel-Report wird vorbereitet.', 'info')} className="btn-secondary text-base px-5 py-3">
+              <button onClick={() => goBeispielReport()} className="btn-secondary text-base px-5 py-3">
                 Beispiel-Report ansehen
               </button>
             </div>
             <p className="mt-5 text-sm text-ink-500 animate-fade-up" style={{ animationDelay: '240ms' }}>
-              Fuer AZAV-/Bildungsgutschein-nahe Kursplanung, Coaching und Arbeitsmarktnachweis.
+              Passend zur AZAV-/Bildungsgutschein-Kursplanung, Coaching und Arbeitsmarktnachweis.
             </p>
           </div>
         </div>
@@ -195,7 +195,7 @@ export default function LandingPage() {
               Pilot anfragen
               <ArrowRight className="h-4 w-4" />
             </button>
-            <button onClick={() => toast('Beispiel-Report wird auf Anfrage bereitgestellt.', 'info')} className="btn-secondary text-base px-5 py-3">
+            <button onClick={() => goBeispielReport()} className="btn-secondary text-base px-5 py-3">
               Beispielreport ansehen
             </button>
           </div>
@@ -228,7 +228,7 @@ export default function LandingPage() {
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-50 text-accent-600">
                 <Radar className="h-5 w-5" />
               </span>
-              <h2 className="font-display text-xl font-semibold text-ink-900">JobRadar Loesung</h2>
+              <h2 className="font-display text-xl font-semibold text-ink-900">JobRadar System</h2>
             </div>
             <ul className="space-y-3">
               {solutions.map((s) => (
@@ -249,7 +249,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">So funktioniert JobRadar</h2>
-            <p className="mt-3 text-ink-600">Vom Anbieter bis zum woechentlichen Report — in vier klaren Schritten.</p>
+            <p className="mt-3 text-ink-600">Vom Anbieter bis zum laufenden Report — in vier klaren Schritten.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {steps.map((s, i) => (
@@ -283,7 +283,7 @@ export default function LandingPage() {
       <section id="preview" className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
         <div className="text-center max-w-2xl mx-auto mb-10">
           <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Schulportal <span className="text-ink-400 font-normal text-xl">(Pilotansicht)</span></h2>
-          <p className="mt-3 text-ink-600">Kurse, freigegebene Matches, Reports und Tarif-Leistung — sichtbar fuer die jeweilige Schule.</p>
+          <p className="mt-3 text-ink-600">Kurse, freigegebene Matches, Reports und Tarif-Leistung — je Schule einsehbar.</p>
         </div>
         {/* Browser frame mockup */}
         <div className="card p-2 shadow-lift max-w-5xl mx-auto animate-fade-up">
@@ -330,7 +330,7 @@ export default function LandingPage() {
         </div>
         <div className="text-center mt-8">
           <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
-            Schulportal oeffnen
+            Schulportal starten
             <ArrowRight className="h-4.5 w-4.5" />
           </button>
         </div>
@@ -340,7 +340,7 @@ export default function LandingPage() {
       <section id="bildungstraeger" className="bg-white border-y border-ink-200/60">
         <div className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
           <div className="text-center max-w-2xl mx-auto mb-12">
-            <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorteile fuer alle Beteiligten</h2>
+            <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorteile auf einen Blick</h2>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {benefits.map((b, i) => (
@@ -365,7 +365,7 @@ export default function LandingPage() {
             </span>
             <h3 className="mt-3 font-display text-xl md:text-2xl font-semibold tracking-tight text-ink-900">Referenzen in Vorbereitung</h3>
             <p className="mt-2 text-ink-600 leading-relaxed max-w-2xl">
-              JobRadar befindet sich in der Pilotphase. Statt kuenstlicher Bewertungen zeigen wir transparent, wie Feedback, Case Studies und Kundenstimmen spaeter eingebunden werden.
+              JobRadar befindet sich in der Pilotphase. Statt unechter Bewertungen zeigen wir transparent, wie Feedback, Case Studies und Kundenstimmen danach eingebunden werden.
             </p>
           </div>
           <button onClick={() => goReferenzen()} className="btn-primary shrink-0">
@@ -381,9 +381,9 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-4xl px-5 sm:px-8 py-20 text-center">
           <Quote className="h-10 w-10 text-brand-300 mx-auto mb-6" />
           <p className="font-display text-2xl md:text-3xl font-medium tracking-tight text-ink-900 leading-snug text-balance">
-            „Wir ersetzen keine Coaches. Wir liefern die woechentliche Marktgrundlage."
+            „Wir ersetzen keine Coaches. Wir liefern die aktuelle Marktgrundlage."
           </p>
-          <p className="mt-5 text-sm text-ink-500">JobRadar Weiterbildung — KI-gestuetzt, menschlich geprueft.</p>
+          <p className="mt-5 text-sm text-ink-500">JobRadar Weiterbildung — KI-Analyse, menschliche QA.</p>
         </div>
       </section>
 
@@ -395,14 +395,14 @@ export default function LandingPage() {
             Erstes Pilotprojekt starten?
           </h2>
           <p className="mt-4 text-ink-600 leading-relaxed max-w-xl mx-auto">
-            Wenn Sie JobRadar Weiterbildung testen moechten, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
+            Wenn Sie JobRadar Weiterbildung testen wollen, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
             <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
-            <button onClick={() => goSchool()} className="btn-secondary text-base px-5 py-3">
+            <button onClick={() => goSchulportalDemo()} className="btn-secondary text-base px-5 py-3">
               Schulportal ansehen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>

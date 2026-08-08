@@ -7,6 +7,8 @@ import ImpressumPage from '@/components/ImpressumPage';
 import DatenschutzPage from '@/components/DatenschutzPage';
 import BarrierefreiheitPage from '@/components/BarrierefreiheitPage';
 import KontaktPage from '@/components/KontaktPage';
+import BeispielReportPage from '@/components/BeispielReportPage';
+import SchulportalDemoPage from '@/components/SchulportalDemoPage';
 import { ToastProvider } from '@/components/Toast';
 import SchoolLoginPage from '@/components/school/SchoolLoginPage';
 import SchoolLayout from '@/components/school/SchoolLayout';
@@ -17,7 +19,7 @@ import { getSchoolUser } from '@/hooks/useSchoolAuth';
 
 type Route =
   | 'landing' | 'admin' | 'referenzen' | 'impressum' | 'datenschutz'
-  | 'barrierefreiheit' | 'kontakt'
+  | 'barrierefreiheit' | 'kontakt' | 'beispiel-report' | 'schulportal-demo'
   | 'school-login' | 'school-dashboard' | 'school-jobs' | 'school-profile' | 'school-reports';
 
 function getRoute(): Route {
@@ -28,6 +30,8 @@ function getRoute(): Route {
   if (path === '/datenschutz') return 'datenschutz';
   if (path === '/barrierefreiheit') return 'barrierefreiheit';
   if (path === '/kontakt') return 'kontakt';
+  if (path === '/beispiel-report') return 'beispiel-report';
+  if (path === '/schulportal-demo') return 'schulportal-demo';
   if (path === '/school/login') return 'school-login';
   if (path.startsWith('/school/jobs')) return 'school-jobs';
   if (path === '/school/profile') return 'school-profile';
@@ -48,6 +52,8 @@ export function goImpressum() { nav('/impressum'); }
 export function goDatenschutz() { nav('/datenschutz'); }
 export function goBarrierefreiheit() { nav('/barrierefreiheit'); }
 export function goKontakt() { nav('/kontakt'); }
+export function goBeispielReport() { nav('/beispiel-report'); }
+export function goSchulportalDemo() { nav('/schulportal-demo'); }
 export function goSchool() { nav('/school/login'); }
 
 function SchoolRouter() {
@@ -109,6 +115,8 @@ export default function App() {
       : route === 'datenschutz'    ? <DatenschutzPage />
       : route === 'barrierefreiheit' ? <BarrierefreiheitPage />
       : route === 'kontakt'        ? <KontaktPage />
+      : route === 'beispiel-report' ? <BeispielReportPage />
+      : route === 'schulportal-demo' ? <SchulportalDemoPage />
       :                              <LandingPage />}
     </ToastProvider>
   );
