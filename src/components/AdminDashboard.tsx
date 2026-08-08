@@ -20,6 +20,7 @@ import {
   Trash2,
   RotateCcw,
   Zap,
+  KeyRound,
 } from 'lucide-react';
 import Sidebar, { sections, type SectionKey } from '@/components/Sidebar';
 import CeoCockpit from '@/components/CeoCockpit';
@@ -92,6 +93,8 @@ export default function AdminDashboard() {
   const [addSchoolOpen, setAddSchoolOpen] = useState(false);
   const [renameSchool, setRenameSchool] = useState<School | null>(null);
   const [archiveSchool, setArchiveSchool] = useState<School | null>(null);
+  const [passwordSchool, setPasswordSchool] = useState<School | null>(null);
+  const [passwordValue, setPasswordValue] = useState('');
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newSchoolContact, setNewSchoolContact] = useState('');
   const [renameSchoolValue, setRenameSchoolValue] = useState('');
@@ -191,6 +194,22 @@ export default function AdminDashboard() {
     if (!archiveSchool) return;
     setSchools((ss) => ss.map((s) => (s.id === archiveSchool.id ? { ...s, status: 'archived' } : s)));
     toast('Schule archiviert.', 'warning');
+  };
+  const doSetSchoolPassword = async () => {
+    if (!passwordSchool) return;
+    try {
+      const res = await fetch(`/api/schools/${passwordSchool.id}/set-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordValue }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      toast(passwordValue ? 'Passwort gesetzt.' : 'Passwort entfernt.', 'success');
+    } catch {
+      toast('Fehler beim Setzen des Passworts.', 'warning');
+    }
+    setPasswordSchool(null);
+    setPasswordValue('');
   };
 
   // --- Course actions ---
@@ -381,6 +400,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => { setRenameSchool(s); setRenameSchoolValue(s.name); }} className="btn-ghost px-1.5 py-1 text-xs" title="Umbenennen"><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => { setPasswordSchool(s); setPasswordValue(''); }} className="btn-ghost px-1.5 py-1 text-xs text-brand-600" title="Passwort setzen"><KeyRound className="h-3.5 w-3.5" /></button>
                         <button onClick={() => setArchiveSchool(s)} className="btn-ghost px-1.5 py-1 text-xs text-rose-500" title="Archivieren"><Archive className="h-3.5 w-3.5" /></button>
                       </div>
                     </div>
@@ -779,6 +799,14 @@ export default function AdminDashboard() {
           </div>
         )}
       </Drawer>
+
+      {/* Set school password modal */}
+      <Modal open={!!passwordSchool} onClose={() => { setPasswordSchool(null); setPasswordValue(''); }} title="Portal-Passwort"
+        footer={<><button className="btn-secondary" onClick={() => { setPasswordSchool(null); setPasswordValue(''); }}>Abbrechen</button><button className="btn-primary" onClick={doSetSchoolPassword}>{passwordValue ? 'Passwort setzen' : 'Passwort entfernen'}</button></>}
+      >
+        <p className="text-sm text-ink-600 mb-3">{passwordSchool?.name} — Schulportal-Login</p>
+        <div><label className="label">Neues Passwort (leer lassen zum Entfernen)</label><input className="input" type="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="mind. 6 Zeichen" autoFocus /></div>
+      </Modal>
 
       {/* Add school modal */}
       <Modal open={addSchoolOpen} onClose={() => setAddSchoolOpen(false)} title="Schule hinzufuegen"

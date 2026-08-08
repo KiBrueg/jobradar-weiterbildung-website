@@ -8,6 +8,7 @@ import io
 import json
 import os
 import secrets
+from passlib.context import CryptContext
 import shutil
 import sqlite3
 from contextlib import contextmanager
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import psycopg2
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 import psycopg2.extras
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -123,6 +126,25 @@ def _valid_n8n_token(request: Request) -> bool:
     return bool(supplied) and secrets.compare_digest(supplied, N8N_TOKEN)
 
 
+
+
+SCHOOL_API_PREFIX = "/api/school/"
+SCHOOL_PUBLIC_PATHS = {"/api/school/login"}
+
+def _verify_school_bearer(request: "Request") -> "dict | None":
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    token = auth.removeprefix("Bearer ").strip()
+    if not token or len(token) < 24:
+        return None
+    return one(
+        """SELECT id,name,contact_email,portal_plan,portal_enabled
+             FROM schools WHERE portal_token=? AND portal_enabled=1 AND status<>'archived'""",
+        (token,),
+    )
+
+
 def _is_protected_path(path: str) -> bool:
     return path.startswith(PROTECTED_PREFIXES)
 
@@ -136,6 +158,15 @@ async def optional_admin_basic_auth(request: Request, call_next):
     School portals remain separate tokenized /school/{token} read-only pages.
     """
     path = request.url.path
+    if path.startswith(SCHOOL_API_PREFIX):
+        if path in SCHOOL_PUBLIC_PATHS:
+            return await call_next(request)
+        school = _verify_school_bearer(request)
+        if not school:
+            return Response("Unauthorized", status_code=401,
+                            headers={"WWW-Authenticate": "Bearer realm=\"school portal\""})
+        request.state.school = school
+        return await call_next(request)
     if ADMIN_PASSWORD and _is_protected_path(path):
         if path.startswith(N8N_PREFIX) and _valid_n8n_token(request):
             return await call_next(request)
@@ -337,11 +368,30 @@ def init_db() -> None:
             "portal_price_eur": "REAL DEFAULT 490",
             "portal_valid_until": "TEXT DEFAULT 'Pilotphase · monatlich kuendbar'",
             "portal_note": "TEXT DEFAULT ''",
+            "portal_password": "TEXT DEFAULT ''",
         }
         for col, ddl in portal_migrations.items():
             if col not in school_cols:
                 con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
                 school_cols.add(col)
+        lead_cols = table_columns(con, "leads")
+        lead_migrations = {
+            "school_status": "TEXT DEFAULT 'new'",
+            "school_note": "TEXT DEFAULT ''",
+            "jobradar_job_id": "TEXT DEFAULT ''",
+        }
+        for col, ddl in lead_migrations.items():
+            if col not in lead_cols:
+                con.execute(f"ALTER TABLE leads ADD COLUMN {col} {ddl}")
+                lead_cols.add(col)
+        # Schools table migrations
+        school_cols = table_columns(con, "schools")
+        school_migrations = {
+            "search_profiles": "TEXT DEFAULT NULL",
+        }
+        for col, ddl in school_migrations.items():
+            if col not in school_cols:
+                con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
         existing_courses = con.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
         seed_time = now()
         if not existing_courses:
@@ -1684,8 +1734,16 @@ def get_or_create_school_portal_token(school_id: int) -> dict[str, Any]:
     return {"ok": True, "school_id": school_id, "school": school["name"], "portal_path": f"/school/{token}"}
 
 
+_SPA_SCHOOL_PATHS = {"login", "dashboard", "jobs", "profile", "reports"}
+
+
 @app.get("/school/{token}", response_class=HTMLResponse, include_in_schema=False)
 def school_portal(token: str) -> HTMLResponse:
+    if token in _SPA_SCHOOL_PATHS:
+        idx = FRONTEND_DIST / "index.html"
+        if idx.exists():
+            return HTMLResponse(idx.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+        return HTMLResponse("<!doctype html><html><body>App not built</body></html>", status_code=503)
     try:
         data = school_portal_data(token)
     except HTTPException as exc:
@@ -2180,6 +2238,163 @@ async def qa_reject(match_id: str, request: Request):
     return RedirectResponse("/qa", status_code=303)
 
 
+@app.post("/api/school/login")
+async def school_login(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    if not email:
+        raise HTTPException(400, "email required")
+    school = one(
+        """SELECT id,name,contact_email,portal_token,portal_enabled,portal_plan,portal_password
+             FROM schools WHERE lower(contact_email)=? AND status<>'archived'""",
+        (email,),
+    )
+    if not school or not school.get("portal_enabled"):
+        raise HTTPException(401, "Kein aktives Portal fuer diese E-Mail-Adresse")
+    stored_hash = school.get("portal_password") or ""
+    if stored_hash:
+        if not password or not pwd_context.verify(password, stored_hash):
+            raise HTTPException(401, "Passwort falsch")
+    return {
+        "token": school["portal_token"],
+        "school_name": school["name"],
+        "plan": school.get("portal_plan") or "Pilot",
+    }
+
+
+@app.post("/api/schools/{school_id}/set-password")
+async def set_school_password(school_id: int, request: Request):
+    data = await request.json()
+    plain = (data.get("password") or "").strip()
+    if not plain:
+        exec_sql("UPDATE schools SET portal_password='',updated_at=? WHERE id=?", (now(), school_id))
+        return {"ok": True, "message": "Passwort entfernt"}
+    if len(plain) < 6:
+        raise HTTPException(400, "Passwort muss mindestens 6 Zeichen haben")
+    hashed = pwd_context.hash(plain)
+    exec_sql("UPDATE schools SET portal_password=?,updated_at=? WHERE id=?", (hashed, now(), school_id))
+    return {"ok": True, "message": "Passwort gesetzt"}
+
+
+@app.get("/api/school/me")
+async def school_me(request: Request):
+    school_id = int(request.state.school["id"])
+    s = one("SELECT id,name,contact_email,portal_plan,search_profiles FROM schools WHERE id=?", (school_id,))
+    if s:
+        return dict(s)
+    return dict(request.state.school)
+
+
+@app.post("/api/school/profile")
+async def school_profile_update(request: Request):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    sp = body.get("search_profiles", "")
+    exec_sql("UPDATE schools SET search_profiles=? WHERE id=?", (sp, school_id))
+    return {"ok": True}
+
+
+@app.get("/api/school/dashboard")
+async def school_dashboard(request: Request):
+    school_id = int(request.state.school["id"])
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    week = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    pending = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND COALESCE(l.school_status,'new')='new'""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    avg_row = one(
+        "SELECT ROUND(AVG(l.score),1) AS a FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE ja.school_id=? AND l.score>0",
+        (school_id,),
+    )
+    recent = rows(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
+        (school_id,),
+    )
+    return {
+        "kpi": {
+            "total": total,
+            "week": week,
+            "pending": pending,
+            "avg_score": avg_row["a"] if avg_row else 0,
+        },
+        "recent_leads": recent,
+    }
+
+
+@app.get("/api/school/jobs")
+async def school_jobs(
+    request: Request,
+    status: str = "all",
+    q: str = "",
+    page: int = 1,
+    per_page: int = 20,
+):
+    school_id = int(request.state.school["id"])
+    where = "ja.school_id=?"
+    params: list = [school_id]
+    if status != "all":
+        where += " AND COALESCE(l.school_status,'new')=?"
+        params.append(status)
+    if q:
+        where += " AND (l.title LIKE ? OR l.provider LIKE ?)"
+        params.extend([f"%{q}%", f"%{q}%"])
+    total = (one(
+        f"SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE {where}",
+        tuple(params),
+    ) or {}).get("c", 0)
+    offset = (page - 1) * per_page
+    items = rows(
+        f"""SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                   l.why_fit,l.updated_at,l.sources
+              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE {where}
+             ORDER BY l.updated_at DESC LIMIT ? OFFSET ?""",
+        tuple(params) + (per_page, offset),
+    )
+    return {"total": total, "page": page, "per_page": per_page, "items": items}
+
+
+@app.get("/api/school/jobs/{lead_id}")
+async def school_job_detail(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    lead = one(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit,l.missing_evidence,l.risks,l.sources,l.school_note,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+            WHERE ja.school_id=? AND l.id=?""",
+        (school_id, lead_id),
+    )
+    if not lead:
+        raise HTTPException(404, "not found")
+    return lead
+
+
+@app.post("/api/school/jobs/{lead_id}/status")
+async def school_job_status(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    status = body.get("status", "")
+    note = body.get("note", "")
+    if status not in ("new", "saved", "dismissed"):
+        raise HTTPException(400, "status must be new|saved|dismissed")
+    if not one("SELECT 1 AS x FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id)):
+        raise HTTPException(404, "not found")
+    exec_sql(
+        "UPDATE leads SET school_status=?, school_note=?, updated_at=? WHERE id=?",
+        (status, note, now(), lead_id),
+    )
+    return {"ok": True}
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_react_app(full_path: str):
     """Serve React SPA routes after all API/download routes are registered.
@@ -2195,3 +2410,9 @@ def serve_react_app(full_path: str):
         return FileResponse(react_index)
 
     raise HTTPException(status_code=404, detail="Frontend build not found. Run sync_frontend_from_react.bat first.")
+
+
+# ???????????????????????????????????????????????????????????????????????????????
+# SCHOOL PORTAL API  /api/school/*
+# ???????????????????????????????????????????????????????????????????????????????
+
