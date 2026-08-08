@@ -24,7 +24,7 @@ type Route =
 
 function getRoute(): Route {
   const path = window.location.pathname.replace(/\/$/, '');
-  if (path === '/admin' && window.location.hostname.startsWith('admin.')) return 'admin';
+  if (path === '/admin') return 'admin';
   if (path === '/referenzen') return 'referenzen';
   if (path === '/impressum') return 'impressum';
   if (path === '/datenschutz') return 'datenschutz';

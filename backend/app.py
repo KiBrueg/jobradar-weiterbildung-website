@@ -479,6 +479,16 @@ def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {})
 
 
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+def admin_spa() -> Response:
+    """Serve the React admin SPA. Basic auth already enforced by middleware."""
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return HTMLResponse(react_index.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+    return Response(status_code=303, headers={"Location": "/admin/schools"})
+
+
 @app.get("/api/dashboard")
 def dashboard() -> dict[str, Any]:
     init_db()
