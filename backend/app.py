@@ -1185,14 +1185,9 @@ def approve_lead(lead_id: int, body: dict) -> dict:
     if school_ids:
         for sid in school_ids:
             school_id = int(sid)
-            school_row = one("SELECT name, COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
+            school_row = one("SELECT name FROM schools WHERE id=?", (school_id,))
             if school_row:
-                used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
-                limit = int(school_row.get("job_quota") or 50)
-                if used >= limit:
-                    new_limit = limit + 200
-                    exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (new_limit, now(), school_id))
-                    limit = new_limit
+                pass
             exec_sql(
                 "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
                 (lead_id, school_id, note, now()))
@@ -2118,6 +2113,14 @@ from ceo_metrics import register_ceo_routes
 register_ceo_routes(app, DB_PATH, REPORT_DIR, init_db)
 
 
+@app.post("/api/internal/sync-jobs")
+async def cron_sync_jobs(days: int = 7):
+    """Cron endpoint: sync new jobs from Postgres into SQLite school portal."""
+    from sync_jobs import sync
+    result = sync(days=days)
+    return result
+
+
 # ── QA Review Interface ───────────────────────────────────────────────────────
 
 _QA_CSS = """
@@ -2340,11 +2343,6 @@ async def school_dashboard(request: Request):
              WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
         (school_id,),
     )
-    quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
-    job_quota = int((quota_row or {}).get("job_quota") or 50)
-    if total >= job_quota:
-        job_quota = total + 200
-        exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (job_quota, now(), school_id))
     return {
         "kpi": {
             "total": total,
@@ -2352,7 +2350,7 @@ async def school_dashboard(request: Request):
             "pending": pending,
             "avg_score": avg_row["a"] if avg_row else 0,
             "quota_used": total,
-            "quota_limit": job_quota,
+            "quota_limit": 0,
         },
         "recent_leads": recent,
     }
@@ -2427,12 +2425,7 @@ async def school_job_status(request: Request, lead_id: int):
 async def school_quota(request: Request):
     school_id = int(request.state.school["id"])
     used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
-    quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
-    limit = int((quota_row or {}).get("job_quota") or 50)
-    if used >= limit:
-        limit = used + 200
-        exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (limit, now(), school_id))
-    return {"used": used, "limit": limit, "pct": round(used / limit * 100) if limit else 0}
+    return {"used": used, "limit": 0, "pct": 0}
 
 
 def _period_bounds(period: str) -> tuple[str, str, str]:
@@ -2446,6 +2439,9 @@ def _period_bounds(period: str) -> tuple[str, str, str]:
     elif period == "month":
         start = today - timedelta(days=29)
         return str(start), str(today), "Monatsbericht"
+    elif period == "year":
+        start = today - timedelta(days=364)
+        return str(start), str(today), "Jahresbericht"
     return "", "", "Gesamtbericht"
 
 
@@ -2526,44 +2522,86 @@ def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[by
     return buf.getvalue(), filename, p_start or "–", p_end or date_str
 
 
-@app.get("/api/school/report.pdf")
-async def school_report_pdf(request: Request, period: str = "all"):
-    """Generate a PDF report for a period (day/week/month/all), save to disk, record in DB."""
-    if period not in ("day", "week", "month", "all"):
-        period = "all"
-
-    school = request.state.school
-    school_id = int(school["id"])
-    school_name = school.get("name", "Schule")
-
-    pdf_bytes, filename, p_start, p_end = _build_report_pdf(school_id, school_name, period)
-
+def _ensure_report(school_id: int, school_name: str, period: str) -> dict | None:
+    """Generate and save a report if it doesn't exist for the current period."""
+    p_start, p_end, label = _period_bounds(period)
+    existing = one(
+        "SELECT id FROM reports WHERE school_id=? AND report_type=? AND period_start=? AND period_end=?",
+        (school_id, label, p_start or "–", p_end),
+    )
+    if existing:
+        return existing
+    pdf_bytes, filename, p_start_out, p_end_out = _build_report_pdf(school_id, school_name, period)
     school_dir = REPORT_DIR / safe_report_name(school_name)
     school_dir.mkdir(exist_ok=True)
     file_path = school_dir / filename
     file_path.write_bytes(pdf_bytes)
-
-    report_label = _period_bounds(period)[2]
     exec_sql(
         """INSERT INTO reports(school_id, report_type, period_start, period_end, status, file_path, created_at)
            VALUES(?,?,?,?,?,?,?)""",
-        (school_id, report_label, p_start, p_end, "generated", str(file_path), now()),
+        (school_id, label, p_start_out, p_end_out, "generated", str(file_path), now()),
     )
+    return None
 
+
+def _auto_generate_reports(school_id: int, school_name: str) -> None:
+    """Auto-generate missing reports for all current periods."""
+    for period in ("day", "week", "month", "year"):
+        try:
+            _ensure_report(school_id, school_name, period)
+        except Exception:
+            pass
+
+
+@app.get("/api/school/report.pdf")
+async def school_report_pdf(request: Request, period: str = "all"):
+    """Download a PDF report — uses existing or generates fresh."""
+    if period not in ("day", "week", "month", "year", "all"):
+        period = "all"
+    school = request.state.school
+    school_id = int(school["id"])
+    school_name = school.get("name", "Schule")
+    _ensure_report(school_id, school_name, period)
+    p_start, p_end, label = _period_bounds(period)
+    report = one(
+        "SELECT id, file_path FROM reports WHERE school_id=? AND report_type=? AND period_start=? AND period_end=?",
+        (school_id, label, p_start or "–", p_end),
+    )
+    if report and Path(report["file_path"]).exists():
+        return FileResponse(Path(report["file_path"]), filename=Path(report["file_path"]).name, media_type="application/pdf")
+    pdf_bytes, filename, _, _ = _build_report_pdf(school_id, school_name, period)
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @app.get("/api/school/reports")
 async def school_reports_list(request: Request):
-    """List previously generated reports for this school."""
-    school_id = int(request.state.school["id"])
+    """List reports — auto-generates missing ones for current periods first."""
+    school = request.state.school
+    school_id = int(school["id"])
+    _auto_generate_reports(school_id, school.get("name", "Schule"))
     reports_data = rows(
         """SELECT id, report_type, period_start, period_end, status, file_path, created_at
-             FROM reports WHERE school_id=? ORDER BY created_at DESC LIMIT 50""",
+             FROM reports WHERE school_id=? ORDER BY created_at DESC""",
         (school_id,),
     )
     return {"reports": reports_data}
+
+
+@app.post("/api/internal/generate-reports")
+async def cron_generate_reports():
+    """Cron endpoint: auto-generate daily/weekly/monthly/yearly reports for ALL active schools."""
+    all_schools = rows("SELECT id, name FROM schools WHERE status<>'archived' AND portal_enabled=1", ())
+    generated = 0
+    for s in all_schools:
+        for period in ("day", "week", "month", "year"):
+            try:
+                result = _ensure_report(int(s["id"]), s["name"], period)
+                if result is None:
+                    generated += 1
+            except Exception:
+                pass
+    return {"generated": generated, "schools": len(all_schools)}
 
 
 @app.get("/api/school/reports/{report_id}/download")

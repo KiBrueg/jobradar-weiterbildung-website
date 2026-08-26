@@ -22,10 +22,99 @@ function KPICard({ label, value, sub }: { label: string; value: string | number;
   );
 }
 
+const REPORT_ORDER = ["Gesamtbericht", "Jahresbericht", "Monatsbericht", "Wochenbericht", "Tagesbericht"] as const;
+const REPORT_ICONS: Record<string, string> = {
+  Gesamtbericht: "📊", Jahresbericht: "📅", Monatsbericht: "📆", Wochenbericht: "📋", Tagesbericht: "📄",
+};
+
+function ReportAccordion({ reports }: { reports: Report[] }) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [downloading, setDownloading] = useState<number | null>(null);
+
+  const downloadById = async (id: number) => {
+    setDownloading(id);
+    try {
+      const r = await schoolFetch(`/api/school/reports/${id}/download`);
+      if (!r.ok) return;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `report-${id}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setDownloading(null);
+    }
+  };
+  const grouped = new Map<string, Report[]>();
+  for (const t of REPORT_ORDER) grouped.set(t, []);
+  for (const r of reports) {
+    const bucket = grouped.get(r.report_type) ?? [];
+    bucket.push(r);
+    if (!grouped.has(r.report_type)) grouped.set(r.report_type, bucket);
+  }
+
+  const toggle = (t: string) => setOpen((p) => ({ ...p, [t]: !p[t] }));
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+        <h3 className="font-semibold text-gray-900 dark:text-white">Erstellte Reports</h3>
+        <p className="text-xs text-gray-400 mt-0.5">{reports.length} Reports insgesamt</p>
+      </div>
+      <div className="divide-y divide-gray-100 dark:divide-gray-700">
+        {[...grouped.entries()].map(([type, items]) => {
+          if (items.length === 0) return null;
+          const isOpen = open[type] ?? false;
+          return (
+            <div key={type}>
+              <button
+                onClick={() => toggle(type)}
+                className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-gray-50 dark:hover:bg-gray-700/40 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+                  <span>{REPORT_ICONS[type] ?? "📄"}</span>
+                  <span>{type}</span>
+                  <span className="text-xs font-normal text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-full">{items.length}</span>
+                </span>
+                <span className={`text-gray-400 text-xs transition-transform ${isOpen ? "rotate-90" : ""}`}>▶</span>
+              </button>
+              {isOpen && (
+                <table className="w-full text-sm">
+                  <thead className="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50/50 dark:bg-gray-700/30">
+                    <tr>
+                      <th className="px-5 py-2 text-left font-medium pl-12">Zeitraum</th>
+                      <th className="px-5 py-2 text-left font-medium hidden md:table-cell">Erstellt</th>
+                      <th className="px-5 py-2 text-center font-medium w-16">↓</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
+                    {items.map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20">
+                        <td className="px-5 py-2.5 text-gray-500 dark:text-gray-400 pl-12">{r.period_start} – {r.period_end}</td>
+                        <td className="px-5 py-2.5 text-gray-400 hidden md:table-cell text-xs">{r.created_at?.slice(0, 16)}</td>
+                        <td className="px-5 py-2.5 text-center">
+                          <button onClick={() => downloadById(r.id)} disabled={downloading === r.id} className="text-blue-600 hover:underline dark:text-blue-400 text-xs disabled:opacity-50">{downloading === r.id ? "…" : "PDF"}</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const PERIODS = [
   { value: "day", label: "Tag" },
   { value: "week", label: "Woche" },
   { value: "month", label: "Monat" },
+  { value: "year", label: "Jahr" },
   { value: "all", label: "Gesamt" },
 ] as const;
 
@@ -89,14 +178,15 @@ export default function SchoolDashboard() {
         <KPICard label="Ø Fit-Score" value={kpi?.avg_score ? `${kpi.avg_score}%` : "–"} />
       </div>
 
-      {/* Quota bar */}
+      {/* Reports toolbar */}
       {kpi && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Kontingent: {kpi.quota_used} / {kpi.quota_limit} Stellen
+              {kpi.quota_used} Stellen zugewiesen
             </p>
             <div className="flex items-center gap-1">
+              <span className="text-xs text-gray-400 mr-1">PDF-Report:</span>
               {PERIODS.map((p) => (
                 <button
                   key={p.value}
@@ -110,59 +200,11 @@ export default function SchoolDashboard() {
               {generating && <span className="text-xs text-gray-400 ml-1">PDF…</span>}
             </div>
           </div>
-          <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full transition-all ${
-                kpi.quota_used / kpi.quota_limit >= 0.9
-                  ? "bg-red-500"
-                  : kpi.quota_used / kpi.quota_limit >= 0.7
-                  ? "bg-yellow-400"
-                  : "bg-green-500"
-              }`}
-              style={{ width: `${Math.min(100, Math.round(kpi.quota_used / kpi.quota_limit * 100))}%` }}
-            />
-          </div>
-          {kpi.quota_used >= kpi.quota_limit && (
-            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-              Kontingent ausgeschöpft — neue Stellen werden erst nach Erweiterung zugewiesen.
-            </p>
-          )}
         </div>
       )}
 
       {reports.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-            <h3 className="font-semibold text-gray-900 dark:text-white">Erstellte Reports</h3>
-          </div>
-          <table className="w-full text-sm">
-            <thead className="text-xs text-gray-500 dark:text-gray-400 uppercase bg-gray-50 dark:bg-gray-700/50">
-              <tr>
-                <th className="px-5 py-3 text-left font-medium">Typ</th>
-                <th className="px-5 py-3 text-left font-medium">Zeitraum</th>
-                <th className="px-5 py-3 text-left font-medium hidden md:table-cell">Erstellt</th>
-                <th className="px-5 py-3 text-center font-medium">↓</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {reports.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                  <td className="px-5 py-3 text-gray-800 dark:text-gray-200">{r.report_type}</td>
-                  <td className="px-5 py-3 text-gray-500 dark:text-gray-400">{r.period_start} – {r.period_end}</td>
-                  <td className="px-5 py-3 text-gray-400 hidden md:table-cell text-xs">{r.created_at?.slice(0, 16)}</td>
-                  <td className="px-5 py-3 text-center">
-                    <a
-                      href={`/api/school/reports/${r.id}/download`}
-                      className="text-blue-600 hover:underline dark:text-blue-400 text-xs"
-                    >
-                      PDF
-                    </a>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ReportAccordion reports={reports} />
       )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
