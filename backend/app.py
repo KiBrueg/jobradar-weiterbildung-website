@@ -1190,8 +1190,9 @@ def approve_lead(lead_id: int, body: dict) -> dict:
                 used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
                 limit = int(school_row.get("job_quota") or 50)
                 if used >= limit:
-                    quota_exceeded.append({"school_id": school_id, "name": school_row["name"], "used": used, "limit": limit})
-                    continue
+                    new_limit = limit + 200
+                    exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (new_limit, now(), school_id))
+                    limit = new_limit
             exec_sql(
                 "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
                 (lead_id, school_id, note, now()))
@@ -2341,6 +2342,9 @@ async def school_dashboard(request: Request):
     )
     quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
     job_quota = int((quota_row or {}).get("job_quota") or 50)
+    if total >= job_quota:
+        job_quota = total + 200
+        exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (job_quota, now(), school_id))
     return {
         "kpi": {
             "total": total,
@@ -2425,29 +2429,48 @@ async def school_quota(request: Request):
     used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
     quota_row = one("SELECT COALESCE(job_quota,50) AS job_quota FROM schools WHERE id=?", (school_id,))
     limit = int((quota_row or {}).get("job_quota") or 50)
+    if used >= limit:
+        limit = used + 200
+        exec_sql("UPDATE schools SET job_quota=?,updated_at=? WHERE id=?", (limit, now(), school_id))
     return {"used": used, "limit": limit, "pct": round(used / limit * 100) if limit else 0}
 
 
-@app.get("/api/school/report.pdf")
-async def school_report_pdf(request: Request):
-    """Generate a PDF report of all leads assigned to this school."""
+def _period_bounds(period: str) -> tuple[str, str, str]:
+    """Return (period_start, period_end, label) for day/week/month/all."""
+    today = datetime.utcnow().date()
+    if period == "day":
+        return str(today), str(today), "Tagesbericht"
+    elif period == "week":
+        start = today - timedelta(days=6)
+        return str(start), str(today), "Wochenbericht"
+    elif period == "month":
+        start = today - timedelta(days=29)
+        return str(start), str(today), "Monatsbericht"
+    return "", "", "Gesamtbericht"
+
+
+def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[bytes, str, str, str]:
+    """Build PDF bytes, return (pdf_bytes, filename, period_start, period_end)."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
 
-    school = request.state.school
-    school_id = int(school["id"])
-    school_name = school.get("name", "Schule")
+    p_start, p_end, label = _period_bounds(period)
+    date_filter = ""
+    params: list = [school_id]
+    if p_start:
+        date_filter = " AND l.updated_at >= ?"
+        params.append(p_start)
 
     leads_data = rows(
-        """SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
+        f"""SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
                   l.why_fit, l.updated_at
              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
-             WHERE ja.school_id=?
+             WHERE ja.school_id=?{date_filter}
              ORDER BY l.score DESC""",
-        (school_id,),
+        tuple(params),
     )
 
     buf = io.BytesIO()
@@ -2456,12 +2479,15 @@ async def school_report_pdf(request: Request):
     small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
     story = []
 
-    story.append(Paragraph(f"JobRadar — Stellenreport", styles["Title"]))
-    story.append(Paragraph(f"{school_name} · Stand: {datetime.utcnow().strftime('%d.%m.%Y')}", styles["Normal"]))
+    story.append(Paragraph(f"JobRadar — {label}", styles["Title"]))
+    subtitle = f"{school_name} · Stand: {datetime.utcnow().strftime('%d.%m.%Y')}"
+    if p_start:
+        subtitle += f" · Zeitraum: {p_start} – {p_end}"
+    story.append(Paragraph(subtitle, styles["Normal"]))
     story.append(Spacer(1, 0.5*cm))
 
     if not leads_data:
-        story.append(Paragraph("Noch keine Stellen zugewiesen.", styles["Normal"]))
+        story.append(Paragraph("Keine Stellen in diesem Zeitraum.", styles["Normal"]))
     else:
         STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
         table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
@@ -2495,10 +2521,62 @@ async def school_report_pdf(request: Request):
     story.append(Paragraph("Erstellt von JobRadar Weiterbildung · Nicht zur externen Weitergabe.", small))
 
     doc.build(story)
-    buf.seek(0)
-    filename = f"jobradar-report-{datetime.utcnow().strftime('%Y-%m-%d')}.pdf"
-    return StreamingResponse(buf, media_type="application/pdf",
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    filename = f"{safe_report_name(school_name)}_{period}_{date_str}.pdf"
+    return buf.getvalue(), filename, p_start or "–", p_end or date_str
+
+
+@app.get("/api/school/report.pdf")
+async def school_report_pdf(request: Request, period: str = "all"):
+    """Generate a PDF report for a period (day/week/month/all), save to disk, record in DB."""
+    if period not in ("day", "week", "month", "all"):
+        period = "all"
+
+    school = request.state.school
+    school_id = int(school["id"])
+    school_name = school.get("name", "Schule")
+
+    pdf_bytes, filename, p_start, p_end = _build_report_pdf(school_id, school_name, period)
+
+    school_dir = REPORT_DIR / safe_report_name(school_name)
+    school_dir.mkdir(exist_ok=True)
+    file_path = school_dir / filename
+    file_path.write_bytes(pdf_bytes)
+
+    report_label = _period_bounds(period)[2]
+    exec_sql(
+        """INSERT INTO reports(school_id, report_type, period_start, period_end, status, file_path, created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        (school_id, report_label, p_start, p_end, "generated", str(file_path), now()),
+    )
+
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/api/school/reports")
+async def school_reports_list(request: Request):
+    """List previously generated reports for this school."""
+    school_id = int(request.state.school["id"])
+    reports_data = rows(
+        """SELECT id, report_type, period_start, period_end, status, file_path, created_at
+             FROM reports WHERE school_id=? ORDER BY created_at DESC LIMIT 50""",
+        (school_id,),
+    )
+    return {"reports": reports_data}
+
+
+@app.get("/api/school/reports/{report_id}/download")
+async def school_report_download(report_id: int, request: Request):
+    """Download a previously generated report."""
+    school_id = int(request.state.school["id"])
+    report = one("SELECT file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report or not report.get("file_path"):
+        raise HTTPException(404, "Report nicht gefunden")
+    path = Path(report["file_path"])
+    if not path.exists():
+        raise HTTPException(404, "Datei nicht mehr verfügbar")
+    return FileResponse(path, filename=path.name, media_type="application/pdf")
 
 
 @app.post("/api/admin/schools/{school_id}/send-digest")
