@@ -1,9 +1,21 @@
-import { ArrowLeft, Mail, MessageSquare, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Mail, MessageSquare, ShieldCheck, Copy, Check } from 'lucide-react';
+import { useState } from 'react';
 import { goLanding, goDatenschutz } from '@/App';
 import PublicHeader from '@/components/PublicHeader';
 import PublicFooter from '@/components/PublicFooter';
 
+const EMAIL = 'kontakt@kibrueg.de';
+
 export default function KontaktPage() {
+  const [copied, setCopied] = useState(false);
+
+  function copyEmail() {
+    navigator.clipboard.writeText(EMAIL).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
   return (
     <div className="min-h-screen bg-ink-50 text-ink-900">
       <PublicHeader />
@@ -26,11 +38,15 @@ export default function KontaktPage() {
             <div className="card-soft p-5">
               <Mail className="h-6 w-6 text-brand-700 mb-3" />
               <h2 className="font-display text-lg font-semibold">E-Mail</h2>
-              <p className="mt-2 text-sm text-ink-600">
-                <a href="mailto:kontakt@kibrueg.de" className="text-brand-700 font-medium hover:underline">
-                  kontakt@kibrueg.de
-                </a>
-              </p>
+              <button
+                onClick={copyEmail}
+                className="mt-2 flex items-center gap-1.5 text-sm text-brand-700 font-medium hover:underline"
+                title="In Zwischenablage kopieren"
+              >
+                {EMAIL}
+                {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+              {copied && <p className="text-xs text-green-600 mt-1">E-Mail kopiert!</p>}
             </div>
             <div className="card-soft p-5">
               <MessageSquare className="h-6 w-6 text-brand-700 mb-3" />
@@ -53,7 +69,15 @@ export default function KontaktPage() {
             <p className="text-sm text-ink-500 mb-4">
               Schreiben Sie uns per E-Mail — wir melden uns in der Regel innerhalb von 24 Stunden.
             </p>
-            <p className="text-base font-semibold text-ink-900 select-all">kontakt@kibrueg.de</p>
+            <button
+              onClick={copyEmail}
+              className="flex items-center gap-2 text-base font-semibold text-ink-900 hover:text-brand-700 transition-colors"
+              title="In Zwischenablage kopieren"
+            >
+              {EMAIL}
+              {copied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4 text-ink-400" />}
+            </button>
+            {copied && <p className="text-xs text-green-600 mt-1">✓ E-Mail in die Zwischenablage kopiert</p>}
             <p className="mt-4 text-xs text-ink-400">
               Datenschutzhinweis: Ihre Anfrage wird ausschließlich zur Bearbeitung und Kontaktaufnahme genutzt. Weitere Informationen in unserer{' '}
               <button
