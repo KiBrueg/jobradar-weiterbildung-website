@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { schoolFetch } from "@/hooks/useSchoolAuth";
 
 interface KPI { total: number; week: number; pending: number; avg_score: number; quota_used: number; quota_limit: number }
-interface Lead { id: number; title: string; provider: string; score: number; school_status: string; updated_at: string }
+interface Lead { id: number; title: string; provider: string; score: number; school_status: string; sources: string; updated_at: string }
 interface Report { id: number; report_type: string; period_start: string; period_end: string; status: string; created_at: string }
 interface DashboardData { kpi: KPI; recent_leads: Lead[] }
 
@@ -195,9 +195,9 @@ export default function SchoolDashboard() {
       {kpi && (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {kpi.quota_used} Stellen zugewiesen
-            </p>
+            <a href="/school/jobs" className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline">
+              {kpi.quota_used} Stellen zugewiesen →
+            </a>
             <div className="flex items-center gap-1">
               <span className="text-xs text-gray-400 mr-1">PDF-Report:</span>
               {PERIODS.map((p) => (
@@ -250,7 +250,11 @@ export default function SchoolDashboard() {
                   className="hover:bg-gray-50 dark:hover:bg-gray-700/40 cursor-pointer transition-colors"
                   onClick={() => (window.location.href = `/school/jobs/${l.id}`)}
                 >
-                  <td className="px-5 py-3 font-medium text-gray-800 dark:text-gray-200">{l.title}</td>
+                  <td className="px-5 py-3 font-medium text-gray-800 dark:text-gray-200">
+                    {l.sources ? (
+                      <a href={l.sources} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 dark:text-blue-400 hover:underline">{l.title}</a>
+                    ) : l.title}
+                  </td>
                   <td className="px-5 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell">{l.provider}</td>
                   <td className="px-5 py-3 text-center">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${scoreColorClass(l.score)}`}>

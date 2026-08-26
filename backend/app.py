@@ -2338,7 +2338,7 @@ async def school_dashboard(request: Request):
         (school_id,),
     )
     recent = rows(
-        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,l.updated_at
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,l.sources,l.updated_at
              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
              WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
         (school_id,),
@@ -2462,7 +2462,7 @@ def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[by
 
     leads_data = rows(
         f"""SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
-                  l.why_fit, l.updated_at
+                  l.why_fit, l.sources, l.updated_at
              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
              WHERE ja.school_id=?{date_filter}
              ORDER BY l.score DESC""",
@@ -2486,10 +2486,18 @@ def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[by
         story.append(Paragraph("Keine Stellen in diesem Zeitraum.", styles["Normal"]))
     else:
         STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
+        link_style = ParagraphStyle("link", parent=small, textColor=colors.HexColor("#2563eb"))
         table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
         for lead in leads_data:
+            title = lead.get("title") or ""
+            url = (lead.get("sources") or "").strip()
+            if url:
+                from xml.sax.saxutils import escape
+                title_cell = Paragraph(f'<a href="{escape(url)}" color="#2563eb">{escape(title)}</a>', link_style)
+            else:
+                title_cell = Paragraph(title, small)
             table_data.append([
-                Paragraph(lead.get("title") or "", small),
+                title_cell,
                 Paragraph(lead.get("provider") or "", small),
                 f"{lead.get('score') or 0}%",
                 STATUS_DE.get(lead.get("school_status") or "new", "Neu"),
@@ -2523,11 +2531,12 @@ def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[by
 
 
 def _ensure_report(school_id: int, school_name: str, period: str) -> dict | None:
-    """Generate and save a report if it doesn't exist for the current period."""
-    p_start, p_end, label = _period_bounds(period)
+    """Generate and save a report if one doesn't already exist for this type today."""
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
     existing = one(
-        "SELECT id FROM reports WHERE school_id=? AND report_type=? AND period_start=? AND period_end=?",
-        (school_id, label, p_start or "–", p_end),
+        "SELECT id FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
     )
     if existing:
         return existing
@@ -2562,12 +2571,13 @@ async def school_report_pdf(request: Request, period: str = "all"):
     school_id = int(school["id"])
     school_name = school.get("name", "Schule")
     _ensure_report(school_id, school_name, period)
-    p_start, p_end, label = _period_bounds(period)
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
     report = one(
-        "SELECT id, file_path FROM reports WHERE school_id=? AND report_type=? AND period_start=? AND period_end=?",
-        (school_id, label, p_start or "–", p_end),
+        "SELECT id, file_path FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
     )
-    if report and Path(report["file_path"]).exists():
+    if report and report.get("file_path") and Path(report["file_path"]).exists():
         return FileResponse(Path(report["file_path"]), filename=Path(report["file_path"]).name, media_type="application/pdf")
     pdf_bytes, filename, _, _ = _build_report_pdf(school_id, school_name, period)
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",

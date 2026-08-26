@@ -8,6 +8,7 @@ interface Lead {
   score: number;
   school_status: string;
   why_fit: string;
+  sources: string;
   updated_at: string;
 }
 
@@ -181,7 +182,9 @@ export default function SchoolJobsPage() {
                       }`}
                     >
                       <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200 max-w-xs truncate">
-                        {l.title}
+                        {l.sources ? (
+                          <a href={l.sources} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-600 dark:text-blue-400 hover:underline">{l.title}</a>
+                        ) : l.title}
                       </td>
                       <td className="px-4 py-3 text-gray-500 dark:text-gray-400 hidden md:table-cell text-xs">
                         {l.provider}
@@ -249,6 +252,12 @@ export default function SchoolJobsPage() {
               <ScoreBadge score={selected.score} />
               <StatusPill status={selected.school_status} />
             </div>
+
+            {selected.sources && (
+              <a href={selected.sources} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline break-all">
+                Zur Stellenanzeige →
+              </a>
+            )}
 
             {selected.why_fit && (
               <div>
