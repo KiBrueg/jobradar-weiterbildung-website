@@ -2617,6 +2617,21 @@ async def school_report_download(report_id: int, request: Request):
     return FileResponse(path, filename=path.name, media_type="application/pdf")
 
 
+@app.delete("/api/school/reports/{report_id}")
+async def school_report_delete(report_id: int, request: Request):
+    school_id = int(request.state.school["id"])
+    report = one("SELECT id, file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report:
+        raise HTTPException(404, "Report nicht gefunden")
+    fp = report.get("file_path")
+    if fp:
+        p = Path(fp)
+        if p.exists():
+            p.unlink()
+    exec_sql("DELETE FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    return {"ok": True}
+
+
 @app.post("/api/admin/schools/{school_id}/send-digest")
 async def admin_send_school_digest(school_id: int, request: Request):
     """Send weekly digest notification for a school via the existing webhook."""

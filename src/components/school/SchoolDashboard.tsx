@@ -27,9 +27,10 @@ const REPORT_ICONS: Record<string, string> = {
   Gesamtbericht: "📊", Jahresbericht: "📅", Monatsbericht: "📆", Wochenbericht: "📋", Tagesbericht: "📄",
 };
 
-function ReportAccordion({ reports }: { reports: Report[] }) {
+function ReportAccordion({ reports, onDelete }: { reports: Report[]; onDelete: (id: number) => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
 
   const downloadById = async (id: number) => {
     setDownloading(id);
@@ -45,6 +46,17 @@ function ReportAccordion({ reports }: { reports: Report[] }) {
       URL.revokeObjectURL(url);
     } finally {
       setDownloading(null);
+    }
+  };
+
+  const deleteById = async (id: number) => {
+    if (!confirm("Report löschen?")) return;
+    setDeleting(id);
+    try {
+      const r = await schoolFetch(`/api/school/reports/${id}`, { method: "DELETE" });
+      if (r.ok) onDelete(id);
+    } finally {
+      setDeleting(null);
     }
   };
   const grouped = new Map<string, Report[]>();
@@ -86,7 +98,7 @@ function ReportAccordion({ reports }: { reports: Report[] }) {
                     <tr>
                       <th className="px-5 py-2 text-left font-medium pl-12">Zeitraum</th>
                       <th className="px-5 py-2 text-left font-medium hidden md:table-cell">Erstellt</th>
-                      <th className="px-5 py-2 text-center font-medium w-16">↓</th>
+                      <th className="px-5 py-2 text-center font-medium w-28"></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
@@ -94,8 +106,9 @@ function ReportAccordion({ reports }: { reports: Report[] }) {
                       <tr key={r.id} className="hover:bg-gray-50/50 dark:hover:bg-gray-700/20">
                         <td className="px-5 py-2.5 text-gray-500 dark:text-gray-400 pl-12">{r.period_start} – {r.period_end}</td>
                         <td className="px-5 py-2.5 text-gray-400 hidden md:table-cell text-xs">{r.created_at?.slice(0, 16)}</td>
-                        <td className="px-5 py-2.5 text-center">
+                        <td className="px-5 py-2.5 text-center space-x-2">
                           <button onClick={() => downloadById(r.id)} disabled={downloading === r.id} className="text-blue-600 hover:underline dark:text-blue-400 text-xs disabled:opacity-50">{downloading === r.id ? "…" : "PDF"}</button>
+                          <button onClick={() => deleteById(r.id)} disabled={deleting === r.id} className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 text-xs disabled:opacity-50">{deleting === r.id ? "…" : "✕"}</button>
                         </td>
                       </tr>
                     ))}
@@ -204,7 +217,7 @@ export default function SchoolDashboard() {
       )}
 
       {reports.length > 0 && (
-        <ReportAccordion reports={reports} />
+        <ReportAccordion reports={reports} onDelete={(id) => setReports((prev) => prev.filter((r) => r.id !== id))} />
       )}
 
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
