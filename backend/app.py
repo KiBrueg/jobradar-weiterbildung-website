@@ -2485,17 +2485,20 @@ def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[by
     if not leads_data:
         story.append(Paragraph("Keine Stellen in diesem Zeitraum.", styles["Normal"]))
     else:
+        from xml.sax.saxutils import escape as xml_escape
         STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
         link_style = ParagraphStyle("link", parent=small, textColor=colors.HexColor("#2563eb"))
         table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
         for lead in leads_data:
             title = lead.get("title") or ""
             url = (lead.get("sources") or "").strip()
-            if url:
-                from xml.sax.saxutils import escape
-                title_cell = Paragraph(f'<a href="{escape(url)}" color="#2563eb">{escape(title)}</a>', link_style)
+            if url and url.startswith("http"):
+                title_cell = Paragraph(
+                    f'<link href="{xml_escape(url)}">{xml_escape(title)}</link>',
+                    link_style,
+                )
             else:
-                title_cell = Paragraph(title, small)
+                title_cell = Paragraph(xml_escape(title), small)
             table_data.append([
                 title_cell,
                 Paragraph(lead.get("provider") or "", small),
