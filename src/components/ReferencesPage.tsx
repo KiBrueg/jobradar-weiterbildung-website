@@ -11,8 +11,7 @@ import {
   ClipboardCheck,
   Quote,
 } from 'lucide-react';
-import { goAdmin, goLanding, goReferenzen } from '@/App';
-import { useToast } from '@/components/Toast';
+import { goKontakt, goLanding, goReferenzen, goSchool } from '@/App';
 import PublicFooter from '@/components/PublicFooter';
 import { PageSection, SectionHeading, PlaceholderBanner } from '@/components/references/ui';
 import FeedbackStatusCard from '@/components/references/FeedbackStatusCard';
@@ -25,7 +24,7 @@ const navItems = [
   { label: 'Fuer Bildungstraeger', route: 'landing' as const },
   { label: 'Ablauf', route: 'landing' as const },
   { label: 'Referenzen', route: 'referenzen' as const },
-  { label: 'Admin Demo', route: 'admin' as const },
+  { label: 'Schulportal', route: 'school' as const },
 ];
 
 const categories = [
@@ -44,14 +43,13 @@ const placeholders = [
 ];
 
 export default function ReferencesPage() {
-  const { toast } = useToast();
   const [mobileNav, setMobileNav] = useState(false);
 
   const navItem = (n: (typeof navItems)[number]) => {
     setMobileNav(false);
     if (n.route === 'landing') goLanding();
-    else if (n.route === 'admin') goAdmin();
     else if (n.route === 'referenzen') goReferenzen();
+    else if (n.route === 'school') goSchool();
   };
 
   return (
@@ -76,8 +74,8 @@ export default function ReferencesPage() {
               ))}
             </nav>
             <div className="flex items-center gap-2">
-              <button onClick={() => goAdmin()} className="btn-primary">
-                Admin oeffnen
+              <button onClick={() => goSchool()} className="btn-primary">
+                Schulportal
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
@@ -136,7 +134,7 @@ export default function ReferencesPage() {
               JobRadar Weiterbildung befindet sich in der Pilotphase. Diese Seite ist vorbereitet, um spaeter echte Kundenstimmen, Google-Bewertungen oder Projekt-Feedback sauber und nachvollziehbar einzubinden.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <button onClick={() => toast('Pilotgespraech angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+              <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
                 Pilotgespraech anfragen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
@@ -257,12 +255,12 @@ export default function ReferencesPage() {
             Wenn Sie JobRadar Weiterbildung testen moechten, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <button onClick={() => toast('Pilot angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
-            <button onClick={() => goAdmin()} className="btn-secondary text-base px-5 py-3">
-              Zur Admin Demo
+            <button onClick={() => goSchool()} className="btn-secondary text-base px-5 py-3">
+              Schulportal ansehen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
           </div>

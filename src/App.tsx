@@ -1,6 +1,7 @@
 ﻿import { useEffect, useState } from "react";
 import LandingPage from "@/components/LandingPage";
 import AdminDashboard from "@/components/AdminDashboard";
+import AdminGate from "@/components/AdminGate";
 import ReferencesPage from "@/components/ReferencesPage";
 import ImpressumPage from "@/components/ImpressumPage";
 import DatenschutzPage from "@/components/DatenschutzPage";
@@ -56,6 +57,7 @@ export function goImpressum() { navigate("/impressum"); }
 export function goDatenschutz() { navigate("/datenschutz"); }
 export function goBarrierefreiheit() { navigate("/barrierefreiheit"); }
 export function goKontakt() { navigate("/kontakt"); }
+export function goSchool() { navigate("/school"); }
 
 function SchoolRouter() {
   const [route, setRoute] = useState<Route>(getRoute());
@@ -114,7 +116,7 @@ export default function App() {
     <ToastProvider>
       <a href="#main-content" className="skip-link">Zum Hauptinhalt springen</a>
       {route === "admin" ? (
-        <AdminDashboard />
+        <AdminGate><AdminDashboard /></AdminGate>
       ) : route === "referenzen" ? (
         <ReferencesPage />
       ) : route === "impressum" ? (

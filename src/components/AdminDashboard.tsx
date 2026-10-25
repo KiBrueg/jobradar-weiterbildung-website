@@ -159,13 +159,24 @@ export default function AdminDashboard() {
   const onExport = (label: string) => toast(`Demo: ${label} wurde vorbereitet.`, 'info');
 
   // --- School actions ---
-  const addSchool = () => {
+  const addSchool = async () => {
     if (!newSchoolName.trim()) return;
-    const id = Math.max(0, ...schools.map((s) => s.id)) + 1;
-    setSchools((ss) => [
-      ...ss,
-      { id, name: newSchoolName.trim(), status: 'active', contact: newSchoolContact.trim() || '—', coursesCount: 0, leadsCount: 0, note: 'Neuer Bildungstraeger.' },
-    ]);
+    try {
+      const res = await fetch('/api/schools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newSchoolName.trim(), contact_email: newSchoolContact.trim() }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const { school } = await res.json();
+      setSchools((ss) => [
+        ...ss,
+        { id: school.id, name: school.name, status: 'active', contact: school.contact_email || '—', coursesCount: 0, leadsCount: 0, note: school.note || 'Neuer Bildungstraeger.' },
+      ]);
+    } catch {
+      toast('Fehler beim Speichern.', 'warning');
+      return;
+    }
     setNewSchoolName(''); setNewSchoolContact('');
     setAddSchoolOpen(false);
     toast('Schule hinzugefuegt.');
@@ -208,8 +219,11 @@ export default function AdminDashboard() {
 
   // --- Profile actions ---
   const saveProfile = (updated: SearchProfile) => {
+    const exists = profiles.some((p) => p.id === updated.id);
+    const url = exists && updated.id ? `/api/profiles/${updated.id}` : `/api/courses/${updated.courseId}/profile`;
+    const method = exists && updated.id ? 'PUT' : 'POST';
+    fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) }).catch(() => {});
     setProfiles((ps) => {
-      const exists = ps.some((p) => p.id === updated.id);
       if (exists) return ps.map((p) => (p.id === updated.id ? updated : p));
       return [...ps, updated];
     });
@@ -322,7 +336,6 @@ export default function AdminDashboard() {
                 <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Suchen..." className="input pl-9 py-2 w-48 lg:w-64" />
               </div>
-              <span className="badge bg-brand-50 text-brand-700 ring-1 ring-brand-200">Local MVP</span>
               <button onClick={() => onExport('Backup')} className="btn-secondary">
                 <Download className="h-4 w-4" /><span className="hidden sm:inline">Backup exportieren</span>
               </button>

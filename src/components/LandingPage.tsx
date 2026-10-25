@@ -16,17 +16,18 @@ import {
   Building2,
   Sparkles,
   Quote,
+  PlayCircle,
 } from 'lucide-react';
-import { goAdmin, goReferenzen } from '@/App';
+import { goKontakt, goReferenzen, goSchool } from '@/App';
 import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 
 const navItems = [
+  { label: 'Demo', href: '#demo', action: 'scroll' as const },
   { label: 'Loesung', href: '#loesung', action: 'scroll' as const },
   { label: 'Fuer Bildungstraeger', href: '#bildungstraeger', action: 'scroll' as const },
   { label: 'Ablauf', href: '#ablauf', action: 'scroll' as const },
   { label: 'Referenzen', href: '', action: 'referenzen' as const },
-  { label: 'Admin Demo', href: '#preview', action: 'scroll' as const },
 ];
 
 const problems = [
@@ -107,8 +108,8 @@ export default function LandingPage() {
               ))}
             </nav>
             <div className="flex items-center gap-2">
-              <button onClick={() => goAdmin()} className="btn-primary">
-                Admin oeffnen
+              <button onClick={() => goSchool()} className="btn-primary">
+                Schulportal
                 <ArrowRight className="h-4 w-4" />
               </button>
               <button
@@ -163,8 +164,8 @@ export default function LandingPage() {
               JobRadar verbindet Kursprofile mit realistischen Zielberufen, passenden Stellen und woechentlichen Reports — damit Coaches mehr Zeit fuer Beratung haben.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-              <button onClick={() => goAdmin()} className="btn-primary text-base px-5 py-3">
-                Admin Demo oeffnen
+              <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
+                Schulportal ansehen
                 <ArrowRight className="h-4.5 w-4.5" />
               </button>
               <button onClick={() => toast('Beispiel-Report wird vorbereitet.', 'info')} className="btn-secondary text-base px-5 py-3">
@@ -174,6 +175,57 @@ export default function LandingPage() {
             <p className="mt-5 text-sm text-ink-500 animate-fade-up" style={{ animationDelay: '240ms' }}>
               Fuer AZAV-/Bildungsgutschein-nahe Kursplanung, Coaching und Arbeitsmarktnachweis.
             </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Demo Video */}
+      <section id="demo" className="relative mx-auto max-w-7xl px-5 sm:px-8 py-20">
+        <div className="text-center max-w-2xl mx-auto mb-10">
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">JobRadar in 90 Sekunden</h2>
+          <p className="mt-3 text-ink-600 leading-relaxed">
+            Sehen Sie, wie Weiterbildungstraeger aus Kursprofilen gepruefte Arbeitsmarkt-Matches,
+            Jobcenter-taugliche Reports und konkrete Coaching-Ansaetze erhalten.
+          </p>
+        </div>
+        <div className="max-w-4xl mx-auto">
+          <div className="card p-2 shadow-lift animate-fade-up">
+            <div className="relative rounded-xl bg-ink-900 aspect-video flex items-center justify-center overflow-hidden">
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgb(255 255 255 / 0.15) 1px, transparent 0)', backgroundSize: '24px 24px' }} />
+              <div className="relative text-center px-6">
+                <button
+                  onClick={() => goKontakt()}
+                  className="flex flex-col items-center gap-4 group"
+                  aria-label="Pilot-Demo anfragen"
+                >
+                  <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/20 group-hover:bg-white/20 transition-colors">
+                    <PlayCircle className="h-10 w-10 text-white" />
+                  </span>
+                  <span className="text-white font-semibold text-base">Demo-Video folgt</span>
+                  <span className="text-white/60 text-sm">Persoenliche Live-Demo auf Anfrage verfuegbar</span>
+                </button>
+              </div>
+              <div className="absolute bottom-4 left-4 flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10">
+                  <Radar className="h-4 w-4 text-white" />
+                </span>
+                <span className="text-white/60 text-xs font-medium">JobRadar Weiterbildung</span>
+              </div>
+              <div className="absolute top-4 right-4">
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70 font-medium ring-1 ring-white/20">
+                  ca. 90 Sek.
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
+              Pilot anfragen
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            <button onClick={() => toast('Beispiel-Report wird auf Anfrage bereitgestellt.', 'info')} className="btn-secondary text-base px-5 py-3">
+              Beispielreport ansehen
+            </button>
           </div>
         </div>
       </section>
@@ -258,8 +310,8 @@ export default function LandingPage() {
       {/* Product preview */}
       <section id="preview" className="mx-auto max-w-7xl px-5 sm:px-8 py-20">
         <div className="text-center max-w-2xl mx-auto mb-10">
-          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Admin Dashboard</h2>
-          <p className="mt-3 text-ink-600">KPIs, Schulen, Kurse, Suchprofile und Leads — uebersichtlich in einem Tool.</p>
+          <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight">Vorschau: Schulportal <span className="text-ink-400 font-normal text-xl">(Pilotansicht)</span></h2>
+          <p className="mt-3 text-ink-600">Kurse, freigegebene Matches, Reports und Tarif-Leistung — sichtbar fuer die jeweilige Schule.</p>
         </div>
         {/* Browser frame mockup */}
         <div className="card p-2 shadow-lift max-w-5xl mx-auto animate-fade-up">
@@ -267,7 +319,7 @@ export default function LandingPage() {
             <span className="h-3 w-3 rounded-full bg-rose-300" />
             <span className="h-3 w-3 rounded-full bg-amber-300" />
             <span className="h-3 w-3 rounded-full bg-accent-300" />
-            <span className="ml-3 text-xs text-ink-400 font-mono">jobradar.app/admin</span>
+            <span className="ml-3 text-xs text-ink-400 font-mono">kibrueg.de/school</span>
           </div>
           <div className="p-5 bg-white rounded-b-xl">
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
@@ -305,8 +357,8 @@ export default function LandingPage() {
           </div>
         </div>
         <div className="text-center mt-8">
-          <button onClick={() => goAdmin()} className="btn-primary text-base px-5 py-3">
-            Live Demo oeffnen
+          <button onClick={() => goSchool()} className="btn-primary text-base px-5 py-3">
+            Schulportal oeffnen
             <ArrowRight className="h-4.5 w-4.5" />
           </button>
         </div>
@@ -374,12 +426,12 @@ export default function LandingPage() {
             Wenn Sie JobRadar Weiterbildung testen moechten, kann ein erstes Kursprofil als Pilot vorbereitet werden — mit transparentem Report und optionaler Feedbackfreigabe.
           </p>
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <button onClick={() => toast('Pilot angefragt — Demo', 'info')} className="btn-primary text-base px-5 py-3">
+            <button onClick={() => goKontakt()} className="btn-primary text-base px-5 py-3">
               Pilot anfragen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
-            <button onClick={() => goAdmin()} className="btn-secondary text-base px-5 py-3">
-              Zur Admin Demo
+            <button onClick={() => goSchool()} className="btn-secondary text-base px-5 py-3">
+              Schulportal ansehen
               <ArrowRight className="h-4.5 w-4.5" />
             </button>
           </div>

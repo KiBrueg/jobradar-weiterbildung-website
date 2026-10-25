@@ -5,33 +5,28 @@ import PublicFooter from '@/components/PublicFooter';
 
 const sections = [
   {
-    title: 'Angaben gemaess § 5 DDG',
-    body: 'Angaben folgen vor Veroeffentlichung.',
-    note: 'Diese Projektseite nutzt bewusst keine Platzhalter-Adresse, die als echte Anbieterinformation missverstanden werden koennte.',
-  },
-  {
-    title: 'Verantwortlich fuer den Inhalt',
-    body: 'Angaben folgen vor Veroeffentlichung.',
+    title: 'Angaben gemäß § 5 DDG',
+    body: 'Kirill Brüggemann\nKollatzstraße 2\n14059 Berlin\nDeutschland',
   },
   {
     title: 'Kontakt',
-    body: 'Kontaktadresse wird vor Veroeffentlichung ergaenzt.',
+    body: 'E-Mail: kontakt@kibrueg.de\nWeb: kibrueg.de',
   },
   {
-    title: 'Umsatzsteuer-ID, falls vorhanden',
-    body: 'Angaben folgen vor Veroeffentlichung.',
+    title: 'Umsatzsteuer',
+    body: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung). Eine Umsatzsteuer-ID liegt nicht vor.',
   },
   {
-    title: 'Redaktionell verantwortlich',
-    body: 'Angaben folgen vor Veroeffentlichung, falls anwendbar.',
+    title: 'Verantwortlich für den Inhalt gemäß § 18 Abs. 2 MStV',
+    body: 'Kirill Brüggemann\nKollatzstraße 2\n14059 Berlin',
   },
   {
-    title: 'EU-Streitschlichtung / Verbraucherstreitbeilegung',
-    body: 'Angaben folgen vor Veroeffentlichung. Die Europaeische Kommission stellt eine Plattform zur Online-Streitbeilegung bereit: https://ec.europa.eu/consumers/odr/. An der Streitbeilegung wird nicht teilgenommen, solange keine gesetzliche Pflicht besteht.',
+    title: 'EU-Streitschlichtung',
+    body: 'Die Europäische Kommission stellt eine Plattform zur Online-Streitbeilegung (OS) bereit: https://ec.europa.eu/consumers/odr/\n\nZur Teilnahme an einem Streitbeilegungsverfahren vor einer Verbraucherschlichtungsstelle sind wir nicht verpflichtet und nicht bereit.',
   },
   {
-    title: 'Haftung und Projektstatus',
-    body: 'JobRadar Weiterbildung befindet sich im MVP-/Pilotstatus. Inhalte, Leistungsbeschreibungen und rechtliche Angaben werden vor einer oeffentlichen produktiven Nutzung final geprueft.',
+    title: 'Haftung für Inhalte',
+    body: 'Die Inhalte dieser Seite wurden mit Sorgfalt erstellt. Für die Richtigkeit, Vollständigkeit und Aktualität der Inhalte übernehmen wir keine Gewähr. Als Diensteanbieter sind wir gemäß § 7 Abs. 1 DDG für eigene Inhalte nach den allgemeinen Gesetzen verantwortlich.',
   },
 ];
 
@@ -42,7 +37,7 @@ export default function ImpressumPage() {
       <main id="main-content" className="mx-auto max-w-4xl px-5 sm:px-8 py-12 md:py-16">
         <button onClick={goLanding} className="btn-ghost mb-8">
           <ArrowLeft className="h-4 w-4" />
-          Zurueck zur Uebersicht
+          Zurück zur Übersicht
         </button>
 
         <section className="card p-7 md:p-10">
@@ -56,22 +51,17 @@ export default function ImpressumPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 mb-8">
-            Diese Seite ist ein Arbeitsstand. Rechtliche Angaben werden vor Veroeffentlichung final geprueft und ergaenzt. Es werden keine erfundenen Adressen, USt-IDs oder Registerdaten verwendet.
-          </div>
-
           <div className="space-y-8 text-ink-700 leading-relaxed">
             {sections.map((s) => (
               <section key={s.title}>
                 <h2 className="font-display text-xl font-semibold text-ink-900 mb-3">{s.title}</h2>
-                <p>{s.body}</p>
-                {s.note && <p className="mt-2 text-sm text-ink-500">{s.note}</p>}
+                <p className="whitespace-pre-line">{s.body}</p>
               </section>
             ))}
           </div>
 
           <div className="mt-10 flex flex-wrap gap-3 border-t border-ink-200 pt-6">
-            <button onClick={goKontakt} className="btn-secondary">Kontaktseite oeffnen</button>
+            <button onClick={goKontakt} className="btn-secondary">Kontaktseite öffnen</button>
           </div>
         </section>
       </main>
