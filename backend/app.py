@@ -8,6 +8,7 @@ import io
 import json
 import os
 import secrets
+from passlib.context import CryptContext
 import shutil
 import sqlite3
 from contextlib import contextmanager
@@ -16,10 +17,12 @@ from pathlib import Path
 from typing import Any
 
 import psycopg2
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 import psycopg2.extras
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -75,6 +78,7 @@ ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
 N8N_TOKEN = os.getenv("JOBRADAR_N8N_TOKEN", "")
 PUBLIC_BASE_URL = os.getenv("JOBRADAR_PUBLIC_BASE_URL", "https://kibrueg.de").rstrip("/")
 MANUAL_JOB_WEBHOOK = os.getenv("JOBRADAR_MANUAL_JOB_WEBHOOK", "")
+REGISTRATION_WEBHOOK = os.getenv("JOBRADAR_REGISTRATION_WEBHOOK", "")
 PROTECTED_PREFIXES = ("/admin", "/api", "/download", "/qa")
 N8N_PREFIX = "/api/n8n"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -122,6 +126,25 @@ def _valid_n8n_token(request: Request) -> bool:
     return bool(supplied) and secrets.compare_digest(supplied, N8N_TOKEN)
 
 
+
+
+SCHOOL_API_PREFIX = "/api/school/"
+SCHOOL_PUBLIC_PATHS = {"/api/school/login"}
+
+def _verify_school_bearer(request: "Request") -> "dict | None":
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    token = auth.removeprefix("Bearer ").strip()
+    if not token or len(token) < 24:
+        return None
+    return one(
+        """SELECT id,name,contact_email,portal_plan,portal_enabled
+             FROM schools WHERE portal_token=? AND portal_enabled=1 AND status<>'archived'""",
+        (token,),
+    )
+
+
 def _is_protected_path(path: str) -> bool:
     return path.startswith(PROTECTED_PREFIXES)
 
@@ -135,6 +158,15 @@ async def optional_admin_basic_auth(request: Request, call_next):
     School portals remain separate tokenized /school/{token} read-only pages.
     """
     path = request.url.path
+    if path.startswith(SCHOOL_API_PREFIX):
+        if path in SCHOOL_PUBLIC_PATHS:
+            return await call_next(request)
+        school = _verify_school_bearer(request)
+        if not school:
+            return Response("Unauthorized", status_code=401,
+                            headers={"WWW-Authenticate": "Bearer realm=\"school portal\""})
+        request.state.school = school
+        return await call_next(request)
     if ADMIN_PASSWORD and _is_protected_path(path):
         if path.startswith(N8N_PREFIX) and _valid_n8n_token(request):
             return await call_next(request)
@@ -309,6 +341,17 @@ def init_db() -> None:
               created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_notification_events_created ON notification_events(created_at);
+            CREATE TABLE IF NOT EXISTS school_registrations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              contact_person TEXT NOT NULL,
+              email TEXT NOT NULL,
+              plan TEXT DEFAULT 'pilot',
+              message TEXT DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              status TEXT NOT NULL DEFAULT 'pending'
+            );
+            CREATE INDEX IF NOT EXISTS idx_school_registrations_status ON school_registrations(status, created_at);
             """
         )
 
@@ -317,6 +360,8 @@ def init_db() -> None:
             con.execute("ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL")
         if "provider" not in table_columns(con, "courses"):
             con.execute("ALTER TABLE courses ADD COLUMN provider TEXT DEFAULT ''")
+        if "description" not in table_columns(con, "courses"):
+            con.execute("ALTER TABLE courses ADD COLUMN description TEXT DEFAULT ''")
         school_cols = table_columns(con, "schools")
         portal_migrations = {
             "portal_token": "TEXT DEFAULT ''",
@@ -325,11 +370,31 @@ def init_db() -> None:
             "portal_price_eur": "REAL DEFAULT 490",
             "portal_valid_until": "TEXT DEFAULT 'Pilotphase · monatlich kuendbar'",
             "portal_note": "TEXT DEFAULT ''",
+            "portal_password": "TEXT DEFAULT ''",
+            "job_quota": "INTEGER DEFAULT 50",
         }
         for col, ddl in portal_migrations.items():
             if col not in school_cols:
                 con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
                 school_cols.add(col)
+        lead_cols = table_columns(con, "leads")
+        lead_migrations = {
+            "school_status": "TEXT DEFAULT 'new'",
+            "school_note": "TEXT DEFAULT ''",
+            "jobradar_job_id": "TEXT DEFAULT ''",
+        }
+        for col, ddl in lead_migrations.items():
+            if col not in lead_cols:
+                con.execute(f"ALTER TABLE leads ADD COLUMN {col} {ddl}")
+                lead_cols.add(col)
+        # Schools table migrations
+        school_cols = table_columns(con, "schools")
+        school_migrations = {
+            "search_profiles": "TEXT DEFAULT NULL",
+        }
+        for col, ddl in school_migrations.items():
+            if col not in school_cols:
+                con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
         existing_courses = con.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
         seed_time = now()
         if not existing_courses:
@@ -415,6 +480,16 @@ def index(request: Request):
     if react_index.exists():
         return FileResponse(react_index)
     return templates.TemplateResponse(request, "index.html", {})
+
+
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+def admin_spa() -> Response:
+    """Serve the React admin SPA. Basic auth already enforced by middleware."""
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return HTMLResponse(react_index.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+    return Response(status_code=303, headers={"Location": "/admin/schools"})
 
 
 @app.get("/api/dashboard")
@@ -1108,21 +1183,25 @@ def approve_lead(lead_id: int, body: dict) -> dict:
     exec_sql("UPDATE leads SET status='Approved',updated_at=? WHERE id=?", (now(), lead_id))
     exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
     notification_count = 0
+    quota_exceeded: list[dict] = []
     if school_ids:
         for sid in school_ids:
             school_id = int(sid)
+            school_row = one("SELECT name FROM schools WHERE id=?", (school_id,))
+            if school_row:
+                pass
             exec_sql(
                 "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
                 (lead_id, school_id, note, now()))
             notification_count += _notify_school_new_lead(lead_id, school_id, note)
-        assigned = len(school_ids)
+        assigned = len(school_ids) - len(quota_exceeded)
     else:
         exec_sql(
             "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,NULL,?,?)",
             (lead_id, note, now()))
         assigned = 0
         notification_count = _notify_school_new_lead(lead_id, None, note)
-    return {"ok": True, "assigned_to": assigned, "notification_count": notification_count}
+    return {"ok": True, "assigned_to": assigned, "notification_count": notification_count, "quota_exceeded": quota_exceeded}
 
 
 @app.post("/api/leads/{lead_id}/reject")
@@ -1327,7 +1406,7 @@ def admin_add_job_submit(
 
 
 def admin_nav() -> str:
-    return "<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>"
+    return "<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/registrations'>Anmeldungen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>"
 
 
 def status_options(current: Any) -> str:
@@ -1339,6 +1418,154 @@ def status_options(current: Any) -> str:
 def admin_style() -> str:
     return """<style>
 body{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}nav{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}nav a{color:#94a3b8;text-decoration:none;font-size:14px}nav a:hover{color:#fff}nav b{color:#fff}.wrap{max-width:1180px;margin:28px auto;padding:0 20px}.card{background:#fff;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}.mini{border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:16px 0;background:#fbfdff}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:600;color:#334155}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font:inherit;margin-top:5px}textarea{resize:vertical}.actions{text-align:right;align-self:end}button,.btn{background:#1e293b;color:#fff;border:none;border-radius:8px;padding:9px 14px;text-decoration:none;display:inline-block;cursor:pointer}.primary{background:#2563eb}.small{font-size:12px;padding:6px 10px}table{width:100%;border-collapse:collapse}th{background:#f1f5f9;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase;padding:9px}td{border-top:1px solid #eef2f7;padding:10px;font-size:14px;vertical-align:top}span,.muted{color:#64748b}.portalbox{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;margin-top:14px;word-break:break-all}.profile{margin-top:12px;border-top:1px dashed #cbd5e1;padding-top:12px}@media(max-width:800px){.grid2{grid-template-columns:1fr}.wide{grid-column:auto}}</style>"""
+
+
+def registration_status_badge(status: Any) -> str:
+    value = str(status or "pending")
+    colors = {"pending": "#f59e0b", "approved": "#16a34a", "rejected": "#64748b"}
+    color = colors.get(value, "#64748b")
+    return f"<span style='display:inline-block;border-radius:999px;background:{color};color:white;padding:3px 9px;font-size:12px;font-weight:700'>{e(value)}</span>"
+
+
+def _registration_notify(payload: dict[str, Any]) -> None:
+    """Best-effort notification for new school self-registrations."""
+    webhook = REGISTRATION_WEBHOOK or os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return
+    import urllib.request as _ur, json as _j
+    data = {
+        "event": "school_registration",
+        "to_email": "kontakt@kibrueg.de",
+        "subject": f"Neue JobRadar Schul-Anmeldung: {payload.get('name','')}",
+        **payload,
+    }
+    try:
+        req = _ur.Request(webhook, data=_j.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+    except Exception:
+        # Registration must never fail because the notification hook is unavailable.
+        pass
+
+
+@app.get("/register", response_class=HTMLResponse)
+def school_register_form(request: Request):
+    init_db()
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><title>Schule anmelden · JobRadar</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--brand:#2563eb;--bg:#f8fafc}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.hero{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:white;padding:44px 0}.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+.badge{display:inline-flex;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;color:#dbeafe;font-size:12px;font-weight:700}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:18px 0 12px;letter-spacing:-.04em}p{line-height:1.6}.muted{color:var(--muted)}
+.card{background:white;border:1px solid var(--line);border-radius:18px;padding:24px;margin:24px auto;box-shadow:0 12px 28px rgba(15,23,42,.06)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:700;color:#334155}
+input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #dbe3ef;border-radius:12px;padding:11px 12px;font:inherit;margin-top:6px;background:#fff}textarea{resize:vertical}
+button{background:#2563eb;color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:800;cursor:pointer}.note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px;color:#1e40af}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style></head><body><header class='hero'><div class='wrap'><span class='badge'>JobRadar · Schul-Anmeldung</span><h1>Arbeitsmarkt-Radar fuer Ihre Weiterbildung</h1><p>Reichen Sie Ihre Schule ein. Wir pruefen den Pilotzugang und melden uns innerhalb von 24 Stunden.</p></div></header>
+<main class='wrap'><section class='card'><h2>Schule anmelden</h2><p class='muted'>Keine Teilnehmerdaten erforderlich. Wir benoetigen nur Kontaktdaten fuer die Pilot-Abstimmung.</p>
+<form method='post' action='/register' class='grid'>
+<label>Schulname<input name='name' required maxlength='160' autocomplete='organization'></label>
+<label>Ansprechpartner<input name='contact_person' required maxlength='160' autocomplete='name'></label>
+<label>E-Mail<input name='email' type='email' required maxlength='180' autocomplete='email'></label>
+<label>Plan<select name='plan'><option value='pilot'>Pilot</option><option value='basic'>Basic</option><option value='pro'>Pro</option></select></label>
+<label class='wide'>Nachricht<textarea name='message' rows='5' maxlength='2000' placeholder='Welche Kurse / Standorte / Zielrollen sind fuer Sie relevant?'></textarea></label>
+<div class='wide note'>Nach dem Absenden speichern wir die Anfrage intern und kontaktieren Sie unter der angegebenen E-Mail-Adresse.</div>
+<div class='wide' style='text-align:right'><button>Absenden</button></div>
+</form></section></main></body></html>""")
+
+
+@app.post("/register", response_class=HTMLResponse)
+def school_register_submit(
+    name: str = Form(...), contact_person: str = Form(...), email: str = Form(...),
+    plan: str = Form("pilot"), message: str = Form(""),
+):
+    init_db()
+    clean_name = name.strip()
+    clean_contact = contact_person.strip()
+    clean_email = email.strip().lower()
+    clean_plan = plan.strip().lower()
+    if clean_plan not in {"pilot", "basic", "pro"}:
+        clean_plan = "pilot"
+    if not clean_name or not clean_contact or "@" not in clean_email:
+        raise HTTPException(400, "valid school, contact person and email required")
+    reg_id = exec_sql(
+        """INSERT INTO school_registrations(name,contact_person,email,plan,message,created_at,status)
+           VALUES(?,?,?,?,?,?, 'pending')""",
+        (clean_name[:160], clean_contact[:160], clean_email[:180], clean_plan, message.strip()[:2000], now()),
+    )
+    _registration_notify({
+        "registration_id": reg_id,
+        "name": clean_name[:160],
+        "contact_person": clean_contact[:160],
+        "email": clean_email[:180],
+        "plan": clean_plan,
+        "message": message.strip()[:2000],
+        "admin_url": f"{PUBLIC_BASE_URL}/admin/registrations",
+    })
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Danke · JobRadar</title><style>body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#172033}.wrap{max-width:720px;margin:80px auto;padding:0 20px}.card{background:white;border:1px solid #dbe3ef;border-radius:18px;padding:32px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ok{display:inline-flex;background:#dcfce7;color:#166534;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}a{color:#2563eb}</style></head>
+<body><main class='wrap'><section class='card'><span class='ok'>Anfrage erhalten</span><h1>Vielen Dank.</h1><p>Wir melden uns innerhalb von 24 Stunden bei Ihnen.</p><p><a href='/'>Zurueck zur Startseite</a></p></section></main></body></html>""")
+
+
+@app.get("/admin/registrations", response_class=HTMLResponse)
+def admin_registrations_page(request: Request):
+    init_db()
+    registrations = rows("SELECT * FROM school_registrations ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, created_at DESC")
+    def row(r: dict[str, Any]) -> str:
+        actions = ""
+        if str(r.get("status") or "pending") == "pending":
+            actions = (
+                f"<form method='post' action='/admin/registrations/{r['id']}/approve' style='display:inline'><button class='primary small'>Schule anlegen</button></form> "
+                f"<form method='post' action='/admin/registrations/{r['id']}/reject' style='display:inline'><button class='small' style='background:#64748b'>Ablehnen</button></form>"
+            )
+        else:
+            actions = "<span class='muted'>abgeschlossen</span>"
+        return (
+            f"<tr><td><b>{e(r['name'])}</b><br><span>{e(r.get('created_at',''))}</span></td>"
+            f"<td>{e(r['contact_person'])}<br><span>{e(r['email'])}</span></td>"
+            f"<td>{e(r.get('plan','pilot'))}</td><td>{registration_status_badge(r.get('status'))}</td>"
+            f"<td>{e(r.get('message',''))}</td><td>{actions}</td></tr>"
+        )
+    body = "".join(row(r) for r in registrations) or "<tr><td colspan='6'>Noch keine Anmeldungen.</td></tr>"
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><title>Schul-Anmeldungen</title>{admin_style()}</head><body>
+{admin_nav()}<main class='wrap'><h1>Schul-Anmeldungen</h1><p class='muted'>Anfragen aus der oeffentlichen /register-Form. Approve legt eine Schule als Lead an; Kurse/Suchprofile werden danach in der Schul-Detailseite gepflegt.</p>
+<section class='card'><table><thead><tr><th>Schule</th><th>Kontakt</th><th>Plan</th><th>Status</th><th>Nachricht</th><th>Aktion</th></tr></thead><tbody>{body}</tbody></table></section></main></body></html>"""
+    return HTMLResponse(html_doc)
+
+
+@app.post("/admin/registrations/{registration_id}/approve")
+def admin_registration_approve(registration_id: int):
+    init_db()
+    reg = one("SELECT * FROM school_registrations WHERE id=?", (registration_id,))
+    if not reg:
+        raise HTTPException(404, "registration not found")
+    if reg.get("status") == "approved":
+        existing = one("SELECT id FROM schools WHERE name=?", (reg["name"],))
+        return Response(status_code=303, headers={"Location": f"/admin/schools/{existing['id']}" if existing else "/admin/registrations"})
+    existing = one("SELECT id FROM schools WHERE name=?", (reg["name"].strip(),))
+    note = f"Registration #{registration_id}; Ansprechpartner: {reg['contact_person']}; Plan: {reg.get('plan') or 'pilot'}; Nachricht: {reg.get('message') or ''}"
+    if existing:
+        school_id = int(existing["id"])
+        exec_sql("UPDATE schools SET contact_email=COALESCE(NULLIF(contact_email,''),?), note=CASE WHEN COALESCE(note,'')='' THEN ? ELSE note END, updated_at=? WHERE id=?", (reg["email"], note[:1000], now(), school_id))
+    else:
+        school_id = exec_sql(
+            """INSERT INTO schools(name,website,contact_email,status,note,created_at,updated_at,portal_plan,portal_price_eur)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (reg["name"].strip(), "", reg["email"].strip(), "lead", note[:1000], now(), now(), f"{str(reg.get('plan') or 'pilot').title()} Portal", 49),
+        )
+    exec_sql("UPDATE school_registrations SET status='approved' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/registrations/{registration_id}/reject")
+def admin_registration_reject(registration_id: int):
+    init_db()
+    if not one("SELECT id FROM school_registrations WHERE id=?", (registration_id,)):
+        raise HTTPException(404, "registration not found")
+    exec_sql("UPDATE school_registrations SET status='rejected' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": "/admin/registrations"})
 
 
 @app.get("/admin/schools", response_class=HTMLResponse)
@@ -1368,7 +1595,7 @@ def admin_schools_page(request: Request):
 <section class='card'><h2>Neue Schule</h2><form method='post' action='/admin/schools' class='grid2'>
 <label>Schulname<input name='name' required></label><label>Website<input name='website' placeholder='https://...'></label>
 <label>Kontakt E-Mail<input name='contact_email' type='email'></label><label>Status<select name='status'><option>lead</option><option selected>active</option><option>risk</option><option>archived</option></select></label>
-<label>Portal Plan<input name='portal_plan' value='Pilot Portal'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='49'></label>
+<label>Portal Plan<input name='portal_plan' value='Pilot Portal'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='49'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='50'></label>
 <label class='wide'>Notiz<textarea name='note' rows='3'></textarea></label><label><input type='checkbox' name='portal_enabled' value='1' checked> Portal aktivieren + Token erzeugen</label>
 <div class='actions wide'><button class='primary'>Schule anlegen</button></div></form></section>
 <section class='card'><h2>Bestehende Schulen</h2><table><thead><tr><th>Schule</th><th>Email</th><th>Status</th><th>Kurse/Profile</th><th>Portal</th><th></th></tr></thead><tbody>{body}</tbody></table></section>
@@ -1429,7 +1656,7 @@ def admin_school_detail(school_id: int, request: Request):
 <section class='card'><h2>Schule bearbeiten</h2><form method='post' action='/admin/schools/{school_id}' class='grid2'>
 <label>Schulname<input name='name' value='{e(school['name'])}' required></label><label>Website<input name='website' value='{e(school.get('website',''))}'></label>
 <label>Kontakt E-Mail<input name='contact_email' type='email' value='{e(school.get('contact_email',''))}'></label><label>Status<select name='status'>{status_options(school.get('status'))}</select></label>
-<label>Portal Plan<input name='portal_plan' value='{e(school.get('portal_plan','Pilot Portal'))}'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='{e(school.get('portal_price_eur') or 49)}'></label>
+<label>Portal Plan<input name='portal_plan' value='{e(school.get('portal_plan','Pilot Portal'))}'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='{e(school.get('portal_price_eur') or 49)}'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='{e(school.get('job_quota') or 50)}'></label>
 <label>Portal valid until<input name='portal_valid_until' value='{e(school.get('portal_valid_until',''))}'></label><label><input type='checkbox' name='portal_enabled' value='1' {'checked' if int(school.get('portal_enabled') or 0) else ''}> Portal aktiv</label>
 <label class='wide'>Portal note<textarea name='portal_note' rows='2'>{e(school.get('portal_note',''))}</textarea></label><label class='wide'>Interne Notiz<textarea name='note' rows='3'>{e(school.get('note',''))}</textarea></label>
 <div class='actions wide'><button class='primary'>Schule speichern</button></div></form>
@@ -1450,12 +1677,13 @@ def admin_school_detail(school_id: int, request: Request):
 def admin_update_school(
     school_id: int, name: str = Form(...), website: str = Form(""), contact_email: str = Form(""), status: str = Form("active"),
     note: str = Form(""), portal_plan: str = Form("Pilot Portal"), portal_price_eur: float = Form(49), portal_valid_until: str = Form(""),
-    portal_note: str = Form(""), portal_enabled: str | None = Form(default=None),
+    portal_note: str = Form(""), portal_enabled: str | None = Form(default=None), job_quota: int = Form(50),
 ):
     if not one("SELECT id FROM schools WHERE id=?", (school_id,)):
         raise HTTPException(404, "school not found")
-    exec_sql("""UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,portal_enabled=?,portal_plan=?,portal_price_eur=?,portal_valid_until=?,portal_note=?,updated_at=? WHERE id=?""",
-             (name.strip(), website.strip(), contact_email.strip(), status.strip(), note.strip(), 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur, portal_valid_until.strip(), portal_note.strip(), now(), school_id))
+    quota = max(1, job_quota)
+    exec_sql("""UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,portal_enabled=?,portal_plan=?,portal_price_eur=?,portal_valid_until=?,portal_note=?,job_quota=?,updated_at=? WHERE id=?""",
+             (name.strip(), website.strip(), contact_email.strip(), status.strip(), note.strip(), 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur, portal_valid_until.strip(), portal_note.strip(), quota, now(), school_id))
     exec_sql("UPDATE courses SET provider=?,updated_at=? WHERE school_id=?", (name.strip(), now(), school_id))
     return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
 
@@ -1524,8 +1752,16 @@ def get_or_create_school_portal_token(school_id: int) -> dict[str, Any]:
     return {"ok": True, "school_id": school_id, "school": school["name"], "portal_path": f"/school/{token}"}
 
 
+_SPA_SCHOOL_PATHS = {"login", "dashboard", "jobs", "profile", "reports"}
+
+
 @app.get("/school/{token}", response_class=HTMLResponse, include_in_schema=False)
 def school_portal(token: str) -> HTMLResponse:
+    if token in _SPA_SCHOOL_PATHS:
+        idx = FRONTEND_DIST / "index.html"
+        if idx.exists():
+            return HTMLResponse(idx.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+        return HTMLResponse("<!doctype html><html><body>App not built</body></html>", status_code=503)
     try:
         data = school_portal_data(token)
     except HTTPException as exc:
@@ -1879,6 +2115,14 @@ from ceo_metrics import register_ceo_routes
 register_ceo_routes(app, DB_PATH, REPORT_DIR, init_db)
 
 
+@app.post("/api/internal/sync-jobs")
+async def cron_sync_jobs(days: int = 7):
+    """Cron endpoint: sync new jobs from Postgres into SQLite school portal."""
+    from sync_jobs import sync
+    result = sync(days=days)
+    return result
+
+
 # ── QA Review Interface ───────────────────────────────────────────────────────
 
 _QA_CSS = """
@@ -2020,6 +2264,518 @@ async def qa_reject(match_id: str, request: Request):
     return RedirectResponse("/qa", status_code=303)
 
 
+@app.post("/api/school/login")
+async def school_login(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    if not email:
+        raise HTTPException(400, "email required")
+    school = one(
+        """SELECT id,name,contact_email,portal_token,portal_enabled,portal_plan,portal_password
+             FROM schools WHERE lower(contact_email)=? AND status<>'archived'""",
+        (email,),
+    )
+    if not school or not school.get("portal_enabled"):
+        raise HTTPException(401, "Kein aktives Portal fuer diese E-Mail-Adresse")
+    stored_hash = school.get("portal_password") or ""
+    if stored_hash:
+        if not password or not pwd_context.verify(password, stored_hash):
+            raise HTTPException(401, "Passwort falsch")
+    return {
+        "token": school["portal_token"],
+        "school_name": school["name"],
+        "plan": school.get("portal_plan") or "Pilot",
+    }
+
+
+@app.post("/api/schools/{school_id}/set-password")
+async def set_school_password(school_id: int, request: Request):
+    data = await request.json()
+    plain = (data.get("password") or "").strip()
+    if not plain:
+        exec_sql("UPDATE schools SET portal_password='',updated_at=? WHERE id=?", (now(), school_id))
+        return {"ok": True, "message": "Passwort entfernt"}
+    if len(plain) < 6:
+        raise HTTPException(400, "Passwort muss mindestens 6 Zeichen haben")
+    hashed = pwd_context.hash(plain)
+    exec_sql("UPDATE schools SET portal_password=?,updated_at=? WHERE id=?", (hashed, now(), school_id))
+    return {"ok": True, "message": "Passwort gesetzt"}
+
+
+@app.get("/api/school/me")
+async def school_me(request: Request):
+    school_id = int(request.state.school["id"])
+    s = one("SELECT id,name,contact_email,portal_plan,search_profiles FROM schools WHERE id=?", (school_id,))
+    if s:
+        return dict(s)
+    return dict(request.state.school)
+
+
+@app.post("/api/school/profile")
+async def school_profile_update(request: Request):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    sp = body.get("search_profiles", "")
+    exec_sql("UPDATE schools SET search_profiles=? WHERE id=?", (sp, school_id))
+    return {"ok": True}
+
+
+@app.get("/api/school/courses")
+async def school_courses(request: Request):
+    school_id = int(request.state.school["id"])
+    course_rows = rows(
+        """SELECT c.id, c.name, c.remote, COALESCE(c.description,'') AS description,
+                  COUNT(ja.lead_id) AS job_count
+           FROM courses c
+           LEFT JOIN leads l ON l.course_id=c.id
+           LEFT JOIN job_assignments ja ON ja.lead_id=l.id AND ja.school_id=?
+           WHERE c.school_id=? AND c.status<>'archived'
+           GROUP BY c.id ORDER BY c.name""",
+        (school_id, school_id),
+    )
+    return {"courses": [dict(r) for r in course_rows]}
+
+
+@app.patch("/api/school/courses/{course_id}")
+async def school_course_update(request: Request, course_id: int):
+    school_id = int(request.state.school["id"])
+    if not one("SELECT 1 AS x FROM courses WHERE id=? AND school_id=?", (course_id, school_id)):
+        raise HTTPException(404, "not found")
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    remote = (body.get("remote") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    exec_sql(
+        "UPDATE courses SET name=?, description=?, remote=?, updated_at=? WHERE id=?",
+        (name, description, remote, now(), course_id),
+    )
+    return {"ok": True}
+
+
+@app.get("/api/school/dashboard")
+async def school_dashboard(request: Request):
+    school_id = int(request.state.school["id"])
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    week = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    pending = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND COALESCE(l.school_status,'new')='new'""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    avg_row = one(
+        "SELECT ROUND(AVG(l.score),1) AS a FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE ja.school_id=? AND l.score>0",
+        (school_id,),
+    )
+    recent = rows(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,l.sources,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
+        (school_id,),
+    )
+    return {
+        "kpi": {
+            "total": total,
+            "week": week,
+            "pending": pending,
+            "avg_score": avg_row["a"] if avg_row else 0,
+            "quota_used": total,
+            "quota_limit": 0,
+        },
+        "recent_leads": recent,
+    }
+
+
+@app.get("/api/school/jobs")
+async def school_jobs(
+    request: Request,
+    status: str = "all",
+    q: str = "",
+    course_id: int = 0,
+    page: int = 1,
+    per_page: int = 20,
+):
+    school_id = int(request.state.school["id"])
+    where = "ja.school_id=?"
+    params: list = [school_id]
+    if course_id:
+        where += " AND l.course_id=?"
+        params.append(course_id)
+    if status != "all":
+        where += " AND COALESCE(l.school_status,'new')=?"
+        params.append(status)
+    if q:
+        where += " AND (l.title LIKE ? OR l.provider LIKE ?)"
+        params.extend([f"%{q}%", f"%{q}%"])
+    total = (one(
+        f"SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE {where}",
+        tuple(params),
+    ) or {}).get("c", 0)
+    offset = (page - 1) * per_page
+    items = rows(
+        f"""SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                   l.why_fit,l.updated_at,l.sources
+              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE {where}
+             ORDER BY l.updated_at DESC LIMIT ? OFFSET ?""",
+        tuple(params) + (per_page, offset),
+    )
+    return {"total": total, "page": page, "per_page": per_page, "items": items}
+
+
+@app.get("/api/school/jobs/{lead_id}")
+async def school_job_detail(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    lead = one(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit,l.missing_evidence,l.risks,l.sources,l.school_note,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+            WHERE ja.school_id=? AND l.id=?""",
+        (school_id, lead_id),
+    )
+    if not lead:
+        raise HTTPException(404, "not found")
+    return lead
+
+
+@app.post("/api/school/jobs/{lead_id}/status")
+async def school_job_status(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    status = body.get("status", "")
+    note = body.get("note", "")
+    if status not in ("new", "saved", "dismissed"):
+        raise HTTPException(400, "status must be new|saved|dismissed")
+    if not one("SELECT 1 AS x FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id)):
+        raise HTTPException(404, "not found")
+    exec_sql(
+        "UPDATE leads SET school_status=?, school_note=?, updated_at=? WHERE id=?",
+        (status, note, now(), lead_id),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/school/jobs/{lead_id}")
+async def school_job_delete(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    if not one("SELECT 1 AS x FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id)):
+        raise HTTPException(404, "not found")
+    exec_sql("DELETE FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id))
+    return {"ok": True}
+
+
+@app.post("/api/school/jobs")
+async def school_job_add(request: Request):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    provider = (body.get("provider") or "").strip()
+    sources = (body.get("sources") or "").strip()
+    course_id = body.get("course_id") or None
+
+    ts = now()
+    cur = exec_sql(
+        "INSERT INTO leads(title, provider, status, score, sources, school_status, course_id, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (title, provider, "active", 0, sources, "new", course_id, ts),
+    )
+    # get the new lead id
+    lead_id = one("SELECT id FROM leads WHERE rowid=last_insert_rowid()", ())
+    if not lead_id:
+        raise HTTPException(500, "insert failed")
+    lid = lead_id["id"]
+    exec_sql(
+        "INSERT INTO job_assignments(lead_id, school_id, assigned_at) VALUES(?,?,?)",
+        (lid, school_id, ts),
+    )
+    return {"ok": True, "id": lid}
+
+
+@app.get("/api/school/quota")
+async def school_quota(request: Request):
+    school_id = int(request.state.school["id"])
+    used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    return {"used": used, "limit": 0, "pct": 0}
+
+
+def _period_bounds(period: str) -> tuple[str, str, str]:
+    """Return (period_start, period_end, label) for day/week/month/all."""
+    today = datetime.utcnow().date()
+    if period == "day":
+        return str(today), str(today), "Tagesbericht"
+    elif period == "week":
+        start = today - timedelta(days=6)
+        return str(start), str(today), "Wochenbericht"
+    elif period == "month":
+        start = today - timedelta(days=29)
+        return str(start), str(today), "Monatsbericht"
+    elif period == "year":
+        start = today - timedelta(days=364)
+        return str(start), str(today), "Jahresbericht"
+    return "", "", "Gesamtbericht"
+
+
+def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[bytes, str, str, str]:
+    """Build PDF bytes, return (pdf_bytes, filename, period_start, period_end)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+
+    p_start, p_end, label = _period_bounds(period)
+    date_filter = ""
+    params: list = [school_id]
+    if p_start:
+        date_filter = " AND l.updated_at >= ?"
+        params.append(p_start)
+
+    leads_data = rows(
+        f"""SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit, l.sources, l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=?{date_filter}
+             ORDER BY l.score DESC""",
+        tuple(params),
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
+    story = []
+
+    story.append(Paragraph(f"JobRadar — {label}", styles["Title"]))
+    subtitle = f"{school_name} · Stand: {datetime.utcnow().strftime('%d.%m.%Y')}"
+    if p_start:
+        subtitle += f" · Zeitraum: {p_start} – {p_end}"
+    story.append(Paragraph(subtitle, styles["Normal"]))
+    story.append(Spacer(1, 0.5*cm))
+
+    if not leads_data:
+        story.append(Paragraph("Keine Stellen in diesem Zeitraum.", styles["Normal"]))
+    else:
+        from xml.sax.saxutils import escape as xml_escape
+        STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
+        link_style = ParagraphStyle("link", parent=small, textColor=colors.HexColor("#2563eb"))
+        table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
+        for lead in leads_data:
+            title = lead.get("title") or ""
+            url = (lead.get("sources") or "").strip()
+            if url and url.startswith("http"):
+                title_cell = Paragraph(
+                    f'<link href="{xml_escape(url)}">{xml_escape(title)}</link>',
+                    link_style,
+                )
+            else:
+                title_cell = Paragraph(xml_escape(title), small)
+            table_data.append([
+                title_cell,
+                Paragraph(lead.get("provider") or "", small),
+                f"{lead.get('score') or 0}%",
+                STATUS_DE.get(lead.get("school_status") or "new", "Neu"),
+                (lead.get("updated_at") or "")[:10],
+            ])
+        col_widths = [7*cm, 4*cm, 1.8*cm, 2.5*cm, 2.2*cm]
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph(f"Gesamt: {len(leads_data)} Stellen", styles["Normal"]))
+
+    story.append(Spacer(1, cm))
+    story.append(Paragraph("Erstellt von JobRadar Weiterbildung · Nicht zur externen Weitergabe.", small))
+
+    doc.build(story)
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    filename = f"{safe_report_name(school_name)}_{period}_{date_str}.pdf"
+    return buf.getvalue(), filename, p_start or "–", p_end or date_str
+
+
+def _ensure_report(school_id: int, school_name: str, period: str) -> dict | None:
+    """Generate and save a report if one doesn't already exist for this type today."""
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    existing = one(
+        "SELECT id FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
+    )
+    if existing:
+        return existing
+    pdf_bytes, filename, p_start_out, p_end_out = _build_report_pdf(school_id, school_name, period)
+    school_dir = REPORT_DIR / safe_report_name(school_name)
+    school_dir.mkdir(exist_ok=True)
+    file_path = school_dir / filename
+    file_path.write_bytes(pdf_bytes)
+    exec_sql(
+        """INSERT INTO reports(school_id, report_type, period_start, period_end, status, file_path, created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        (school_id, label, p_start_out, p_end_out, "generated", str(file_path), now()),
+    )
+    return None
+
+
+def _auto_generate_reports(school_id: int, school_name: str) -> None:
+    """Auto-generate missing reports for all current periods."""
+    for period in ("day", "week", "month", "year"):
+        try:
+            _ensure_report(school_id, school_name, period)
+        except Exception:
+            pass
+
+
+@app.get("/api/school/report.pdf")
+async def school_report_pdf(request: Request, period: str = "all"):
+    """Download a PDF report — uses existing or generates fresh."""
+    if period not in ("day", "week", "month", "year", "all"):
+        period = "all"
+    school = request.state.school
+    school_id = int(school["id"])
+    school_name = school.get("name", "Schule")
+    _ensure_report(school_id, school_name, period)
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    report = one(
+        "SELECT id, file_path FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
+    )
+    if report and report.get("file_path") and Path(report["file_path"]).exists():
+        return FileResponse(Path(report["file_path"]), filename=Path(report["file_path"]).name, media_type="application/pdf")
+    pdf_bytes, filename, _, _ = _build_report_pdf(school_id, school_name, period)
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/api/school/reports")
+async def school_reports_list(request: Request):
+    """List reports — auto-generates missing ones for current periods first."""
+    school = request.state.school
+    school_id = int(school["id"])
+    _auto_generate_reports(school_id, school.get("name", "Schule"))
+    reports_data = rows(
+        """SELECT id, report_type, period_start, period_end, status, file_path, created_at
+             FROM reports WHERE school_id=? ORDER BY created_at DESC""",
+        (school_id,),
+    )
+    return {"reports": reports_data}
+
+
+@app.post("/api/internal/generate-reports")
+async def cron_generate_reports():
+    """Cron endpoint: auto-generate daily/weekly/monthly/yearly reports for ALL active schools."""
+    all_schools = rows("SELECT id, name FROM schools WHERE status<>'archived' AND portal_enabled=1", ())
+    generated = 0
+    for s in all_schools:
+        for period in ("day", "week", "month", "year"):
+            try:
+                result = _ensure_report(int(s["id"]), s["name"], period)
+                if result is None:
+                    generated += 1
+            except Exception:
+                pass
+    return {"generated": generated, "schools": len(all_schools)}
+
+
+@app.get("/api/school/reports/{report_id}/download")
+async def school_report_download(report_id: int, request: Request):
+    """Download a previously generated report."""
+    school_id = int(request.state.school["id"])
+    report = one("SELECT file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report or not report.get("file_path"):
+        raise HTTPException(404, "Report nicht gefunden")
+    path = Path(report["file_path"])
+    if not path.exists():
+        raise HTTPException(404, "Datei nicht mehr verfügbar")
+    return FileResponse(path, filename=path.name, media_type="application/pdf")
+
+
+@app.delete("/api/school/reports/{report_id}")
+async def school_report_delete(report_id: int, request: Request):
+    school_id = int(request.state.school["id"])
+    report = one("SELECT id, file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report:
+        raise HTTPException(404, "Report nicht gefunden")
+    fp = report.get("file_path")
+    if fp:
+        p = Path(fp)
+        if p.exists():
+            p.unlink()
+    exec_sql("DELETE FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    return {"ok": True}
+
+
+@app.post("/api/admin/schools/{school_id}/send-digest")
+async def admin_send_school_digest(school_id: int, request: Request):
+    """Send weekly digest notification for a school via the existing webhook."""
+    school = one("SELECT id,name,contact_email,portal_token FROM schools WHERE id=? AND status<>'archived'", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    week_new = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return {"ok": False, "message": "no webhook configured"}
+    email = (school.get("contact_email") or "").strip()
+    if not email:
+        return {"ok": False, "message": "school has no contact email"}
+    portal_url = f"{PUBLIC_BASE_URL}/school/{school['portal_token']}" if school.get("portal_token") else PUBLIC_BASE_URL
+    payload = {
+        "event": "weekly_digest",
+        "school_id": school_id,
+        "school_name": school["name"],
+        "to_email": email,
+        "subject": f"JobRadar Wochenzusammenfassung: {week_new} neue Stelle{'n' if week_new != 1 else ''}",
+        "new_this_week": week_new,
+        "total": total,
+        "portal_url": portal_url,
+    }
+    import urllib.request as _ur
+    try:
+        req = _ur.Request(webhook, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+        _record_notification("weekly_digest", 0, school_id, email, "sent")
+        return {"ok": True, "new_this_week": week_new, "total": total}
+    except Exception as exc:
+        _record_notification("weekly_digest", 0, school_id, email, "error", str(exc))
+        return {"ok": False, "message": str(exc)}
+
+
+@app.post("/api/admin/schools/send-digest-all")
+async def admin_send_digest_all(request: Request):
+    """Send weekly digest to all active schools with email and portal access."""
+    active = rows(
+        """SELECT id FROM schools WHERE status<>'archived' AND portal_enabled=1
+             AND COALESCE(contact_email,'')<>''"""
+    )
+    results = []
+    for s in active:
+        r = await admin_send_school_digest(int(s["id"]), request)
+        results.append({"school_id": s["id"], **r})
+    return {"sent": sum(1 for r in results if r.get("ok")), "total": len(results), "details": results}
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_react_app(full_path: str):
     """Serve React SPA routes after all API/download routes are registered.
@@ -2035,3 +2791,8 @@ def serve_react_app(full_path: str):
         return FileResponse(react_index)
 
     raise HTTPException(status_code=404, detail="Frontend build not found. Run sync_frontend_from_react.bat first.")
+
+
+# ???????????????????????????????????????????????????????????????????????????????
+# SCHOOL PORTAL API  /api/school/*
+# ???????????????????????????????????????????????????????????????????????????????
