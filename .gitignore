@@ -21,3 +21,9 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Local Python environments and generated backup/cache files
+backend/.venv/
+**/__pycache__/
+*.bak
+*.bak_*

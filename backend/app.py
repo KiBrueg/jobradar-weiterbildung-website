@@ -4,9 +4,11 @@ import base64
 import binascii
 import csv
 import html
+import io
 import json
 import os
 import secrets
+from passlib.context import CryptContext
 import shutil
 import sqlite3
 from contextlib import contextmanager
@@ -15,10 +17,12 @@ from pathlib import Path
 from typing import Any
 
 import psycopg2
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 import psycopg2.extras
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
@@ -65,10 +69,18 @@ DB_PATH = BASE_DIR / "jobradar.sqlite3"
 UPLOAD_DIR = BASE_DIR / "uploads"
 REPORT_DIR = BASE_DIR / "reports"
 FRONTEND_DIST = BASE_DIR / "frontend_dist"
+if not (FRONTEND_DIST / "index.html").exists() and (BASE_DIR.parent / "dist" / "index.html").exists():
+    FRONTEND_DIST = BASE_DIR.parent / "dist"
 FRONTEND_ASSETS = FRONTEND_DIST / "assets"
+
 ADMIN_USER = os.getenv("JOBRADAR_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.getenv("JOBRADAR_ADMIN_PASSWORD", "")
-PROTECTED_PREFIXES = ("/admin",)
+N8N_TOKEN = os.getenv("JOBRADAR_N8N_TOKEN", "")
+PUBLIC_BASE_URL = os.getenv("JOBRADAR_PUBLIC_BASE_URL", "https://kibrueg.de").rstrip("/")
+MANUAL_JOB_WEBHOOK = os.getenv("JOBRADAR_MANUAL_JOB_WEBHOOK", "")
+REGISTRATION_WEBHOOK = os.getenv("JOBRADAR_REGISTRATION_WEBHOOK", "")
+PROTECTED_PREFIXES = ("/admin", "/api", "/download", "/qa")
+N8N_PREFIX = "/api/n8n"
 UPLOAD_DIR.mkdir(exist_ok=True)
 REPORT_DIR.mkdir(exist_ok=True)
 
@@ -103,16 +115,63 @@ def _valid_basic_auth(header: str | None) -> bool:
     return secrets.compare_digest(username, ADMIN_USER) and secrets.compare_digest(password, ADMIN_PASSWORD)
 
 
+def _valid_n8n_token(request: Request) -> bool:
+    """Allow n8n machine access without exposing admin Basic credentials."""
+    if not N8N_TOKEN:
+        return False
+    supplied = request.headers.get("x-jobradar-n8n-token", "")
+    auth = request.headers.get("authorization", "")
+    if auth.startswith("Bearer "):
+        supplied = auth.removeprefix("Bearer ")
+    return bool(supplied) and secrets.compare_digest(supplied, N8N_TOKEN)
+
+
+
+
+SCHOOL_API_PREFIX = "/api/school/"
+SCHOOL_PUBLIC_PATHS = {"/api/school/login"}
+
+def _verify_school_bearer(request: "Request") -> "dict | None":
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    token = auth.removeprefix("Bearer ").strip()
+    if not token or len(token) < 24:
+        return None
+    return one(
+        """SELECT id,name,contact_email,portal_plan,portal_enabled
+             FROM schools WHERE portal_token=? AND portal_enabled=1 AND status<>'archived'""",
+        (token,),
+    )
+
+
+def _is_protected_path(path: str) -> bool:
+    return path.startswith(PROTECTED_PREFIXES)
+
+
 @app.middleware("http")
 async def optional_admin_basic_auth(request: Request, call_next):
-    """Protect admin/API/downloads when JOBRADAR_ADMIN_PASSWORD is configured.
+    """Protect internal admin/API/download surfaces in exposed deployments.
 
-    Local development remains passwordless by default; set
-    JOBRADAR_ADMIN_PASSWORD before exposing the MVP beyond localhost.
+    Local development remains passwordless by default. In production set
+    JOBRADAR_ADMIN_PASSWORD. n8n can use JOBRADAR_N8N_TOKEN for /api/n8n/*.
+    School portals remain separate tokenized /school/{token} read-only pages.
     """
-    if ADMIN_PASSWORD and request.url.path.startswith(PROTECTED_PREFIXES):
+    path = request.url.path
+    if path.startswith(SCHOOL_API_PREFIX):
+        if path in SCHOOL_PUBLIC_PATHS:
+            return await call_next(request)
+        school = _verify_school_bearer(request)
+        if not school:
+            return Response("Unauthorized", status_code=401,
+                            headers={"WWW-Authenticate": "Bearer realm=\"school portal\""})
+        request.state.school = school
+        return await call_next(request)
+    if ADMIN_PASSWORD and _is_protected_path(path):
+        if path.startswith(N8N_PREFIX) and _valid_n8n_token(request):
+            return await call_next(request)
         if not _valid_basic_auth(request.headers.get("authorization")):
-            is_ajax = "application/json" in request.headers.get("accept", "")
+            is_ajax = "application/json" in request.headers.get("accept", "") or path.startswith("/api")
             return _unauthorized(is_ajax=is_ajax)
     return await call_next(request)
 
@@ -130,6 +189,10 @@ def db() -> sqlite3.Connection:
 
 def now() -> str:
     return datetime.utcnow().isoformat(timespec="seconds") + "Z"
+
+
+def e(value: Any) -> str:
+    return html.escape(str(value or ""))
 
 
 def rows(sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -247,14 +310,91 @@ def init_db() -> None:
               note TEXT DEFAULT '',
               created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS reports (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL,
+              course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
+              report_type TEXT DEFAULT 'School Report',
+              period_start TEXT DEFAULT '',
+              period_end TEXT DEFAULT '',
+              status TEXT DEFAULT 'prepared',
+              file_path TEXT DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS job_assignments (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+              school_id INTEGER,
+              assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+              note TEXT DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_ja_lead ON job_assignments(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_ja_school ON job_assignments(school_id);
+            CREATE TABLE IF NOT EXISTS notification_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              event_type TEXT NOT NULL,
+              lead_id INTEGER DEFAULT 0,
+              school_id INTEGER DEFAULT 0,
+              to_email TEXT DEFAULT '',
+              status TEXT NOT NULL,
+              error TEXT DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_notification_events_created ON notification_events(created_at);
+            CREATE TABLE IF NOT EXISTS school_registrations (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              contact_person TEXT NOT NULL,
+              email TEXT NOT NULL,
+              plan TEXT DEFAULT 'pilot',
+              message TEXT DEFAULT '',
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              status TEXT NOT NULL DEFAULT 'pending'
+            );
+            CREATE INDEX IF NOT EXISTS idx_school_registrations_status ON school_registrations(status, created_at);
             """
         )
-        # Safe migration for older DB created before schools table.
+
         cols = table_columns(con, "courses")
         if "school_id" not in cols:
             con.execute("ALTER TABLE courses ADD COLUMN school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL")
         if "provider" not in table_columns(con, "courses"):
             con.execute("ALTER TABLE courses ADD COLUMN provider TEXT DEFAULT ''")
+        if "description" not in table_columns(con, "courses"):
+            con.execute("ALTER TABLE courses ADD COLUMN description TEXT DEFAULT ''")
+        school_cols = table_columns(con, "schools")
+        portal_migrations = {
+            "portal_token": "TEXT DEFAULT ''",
+            "portal_enabled": "INTEGER DEFAULT 0",
+            "portal_plan": "TEXT DEFAULT 'Pilot Portal'",
+            "portal_price_eur": "REAL DEFAULT 490",
+            "portal_valid_until": "TEXT DEFAULT 'Pilotphase · monatlich kuendbar'",
+            "portal_note": "TEXT DEFAULT ''",
+            "portal_password": "TEXT DEFAULT ''",
+            "job_quota": "INTEGER DEFAULT 50",
+        }
+        for col, ddl in portal_migrations.items():
+            if col not in school_cols:
+                con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
+                school_cols.add(col)
+        lead_cols = table_columns(con, "leads")
+        lead_migrations = {
+            "school_status": "TEXT DEFAULT 'new'",
+            "school_note": "TEXT DEFAULT ''",
+            "jobradar_job_id": "TEXT DEFAULT ''",
+        }
+        for col, ddl in lead_migrations.items():
+            if col not in lead_cols:
+                con.execute(f"ALTER TABLE leads ADD COLUMN {col} {ddl}")
+                lead_cols.add(col)
+        # Schools table migrations
+        school_cols = table_columns(con, "schools")
+        school_migrations = {
+            "search_profiles": "TEXT DEFAULT NULL",
+        }
+        for col, ddl in school_migrations.items():
+            if col not in school_cols:
+                con.execute(f"ALTER TABLE schools ADD COLUMN {col} {ddl}")
         existing_courses = con.execute("SELECT COUNT(*) FROM courses").fetchone()[0]
         seed_time = now()
         if not existing_courses:
@@ -342,6 +482,16 @@ def index(request: Request):
     return templates.TemplateResponse(request, "index.html", {})
 
 
+@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+def admin_spa() -> Response:
+    """Serve the React admin SPA. Basic auth already enforced by middleware."""
+    react_index = FRONTEND_DIST / "index.html"
+    if react_index.exists():
+        return HTMLResponse(react_index.read_text(encoding="utf-8"),
+                            headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+    return Response(status_code=303, headers={"Location": "/admin/schools"})
+
+
 @app.get("/api/dashboard")
 def dashboard() -> dict[str, Any]:
     init_db()
@@ -409,6 +559,52 @@ def dashboard() -> dict[str, Any]:
             "pending_changes": len([r for r in requests if r["status"] == "pending"]),
         },
     }
+
+
+@app.get("/api/system/status")
+def system_status() -> dict[str, Any]:
+    init_db()
+    latest_notifications = rows(
+        """SELECT event_type,lead_id,school_id,to_email,status,error,created_at
+           FROM notification_events ORDER BY created_at DESC LIMIT 10"""
+    )
+    return {
+        "ok": True,
+        "admin_auth_configured": bool(ADMIN_PASSWORD),
+        "n8n_token_configured": bool(N8N_TOKEN),
+        "approve_notify_webhook_configured": bool(os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")),
+        "public_base_url": PUBLIC_BASE_URL,
+        "counts": one(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM schools WHERE status<>'archived') AS schools,
+              (SELECT COUNT(*) FROM courses WHERE status<>'archived') AS courses,
+              (SELECT COUNT(*) FROM search_profiles WHERE active=1) AS active_profiles,
+              (SELECT COUNT(*) FROM leads) AS leads,
+              (SELECT COUNT(*) FROM notification_events) AS notification_events
+            """
+        ) or {},
+        "latest_notifications": latest_notifications,
+    }
+
+
+@app.post("/api/system/test-notification")
+def test_notification(body: dict | None = None) -> dict[str, Any]:
+    """Send a safe test payload through the configured approve webhook."""
+    init_db()
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return {"ok": False, "sent": 0, "reason": "webhook_not_configured"}
+    school_id = int((body or {}).get("school_id") or 0)
+    school = one("SELECT id,name,contact_email,portal_token FROM schools WHERE id=?", (school_id,)) if school_id else one("SELECT id,name,contact_email,portal_token FROM schools WHERE COALESCE(contact_email,'')<>'' ORDER BY id LIMIT 1")
+    if not school or not (school.get("contact_email") or "").strip():
+        return {"ok": False, "sent": 0, "reason": "school_email_not_configured"}
+    lead_id = int((body or {}).get("lead_id") or 0)
+    lead = one("SELECT id FROM leads WHERE id=?", (lead_id,)) if lead_id else one("SELECT id FROM leads ORDER BY score DESC LIMIT 1")
+    if not lead:
+        return {"ok": False, "sent": 0, "reason": "lead_not_found"}
+    sent = _notify_school_new_lead(int(lead["id"]), int(school["id"]), "JobRadar webhook test")
+    return {"ok": sent > 0, "sent": sent}
 
 
 @app.post("/api/schools")
@@ -656,6 +852,956 @@ def school_report_data(school_id: int) -> dict[str, Any]:
 
 def safe_report_name(name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name).strip("_") or "school"
+
+
+PORTAL_VISIBLE_LEAD_STATUSES = {"approved", "freigegeben", "visible", "strong fit"}
+
+
+def new_portal_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _split_lines(value: Any) -> list[str]:
+    text = str(value or "")
+    if "\n" in text:
+        return [x.strip() for x in text.splitlines() if x.strip()]
+    return [x.strip() for x in text.split(",") if x.strip()]
+
+
+def school_portal_data(token: str) -> dict[str, Any]:
+    """Return a school-scoped, customer-safe data view for /school/{token}.
+
+    This intentionally excludes internal costs, email drafts, raw source payloads,
+    n8n state, prompts, credentials, rejected leads and other schools.
+    """
+    init_db()
+    if not token or len(token) < 24:
+        raise HTTPException(404, "portal not found")
+    school = one(
+        """SELECT id,name,website,contact_email,status,note,portal_plan,portal_price_eur,
+                  portal_valid_until,portal_note
+             FROM schools
+             WHERE portal_token=? AND portal_enabled=1 AND status<>'archived'""",
+        (token,),
+    )
+    if not school:
+        raise HTTPException(404, "portal not found")
+
+    school_id = int(school["id"])
+    courses = rows(
+        """SELECT id,name,funding,remote,fit_score,status,updated_at
+             FROM courses
+             WHERE school_id=? AND status<>'archived'
+             ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'review' THEN 1 WHEN 'risk' THEN 2 ELSE 3 END, name""",
+        (school_id,),
+    )
+    profiles_raw = rows(
+        """SELECT sp.id,sp.course_id,c.name AS course_name,sp.target_titles,sp.skills,
+                  sp.location_rules,sp.language_rules,sp.exclude_titles,sp.active,sp.updated_at
+             FROM search_profiles sp JOIN courses c ON c.id=sp.course_id
+             WHERE c.school_id=? AND c.status<>'archived'
+             ORDER BY c.name""",
+        (school_id,),
+    )
+    profiles = [
+        {
+            "id": p["id"],
+            "course_id": p["course_id"],
+            "course_name": p["course_name"],
+            "target_titles": _split_lines(p["target_titles"]),
+            "skills": _split_lines(p["skills"]),
+            "location_rules": p["location_rules"],
+            "language_rules": p["language_rules"],
+            "active": bool(p["active"]),
+            "updated_at": p["updated_at"],
+        }
+        for p in profiles_raw
+    ]
+    leads = rows(
+        """SELECT l.id,l.course_id,c.name AS course_name,l.title,l.provider,l.status,l.score,
+                  l.why_fit,l.missing_evidence,l.updated_at
+             FROM leads l
+             JOIN job_assignments ja ON ja.lead_id=l.id
+             JOIN courses c ON c.id=l.course_id
+             WHERE lower(l.status)='approved'
+               AND (ja.school_id=? OR ja.school_id IS NULL)
+             ORDER BY l.score DESC, l.updated_at DESC""",
+        (school_id,),
+    )
+    documents = rows(
+        """SELECT d.id,d.course_id,c.name AS course_name,d.original_name,d.doc_type,d.access,d.status,d.uploaded_at
+             FROM documents d JOIN courses c ON c.id=d.course_id
+             WHERE c.school_id=? AND lower(COALESCE(d.access,'')) IN ('school','public')
+             ORDER BY d.uploaded_at DESC""",
+        (school_id,),
+    )
+    reports = rows(
+        """SELECT id,course_id,report_type,period_start,period_end,status,created_at
+             FROM reports
+             WHERE school_id=? AND lower(COALESCE(status,'')) IN ('prepared','published','ready')
+             ORDER BY created_at DESC LIMIT 12""",
+        (school_id,),
+    )
+    stats = {
+        "courses": len(courses),
+        "profiles": len(profiles),
+        "approved_matches": len(leads),
+        "reports": len(reports),
+        "avg_score": round(sum(int(l["score"] or 0) for l in leads) / len(leads), 1) if leads else 0,
+    }
+    return {
+        "school": school,
+        "tariff": {
+            "plan": school.get("portal_plan") or "Pilot Portal",
+            "price_eur": school.get("portal_price_eur") or 490,
+            "valid_until": school.get("portal_valid_until") or "Pilotphase · monatlich kuendbar",
+            "included": [
+                "bis 2 Kurse im Pilot",
+                "4 Suchlaeufe pro Monat",
+                "gepruefte Matches statt Rohdaten",
+                "schulbezogene Reports",
+                "Aenderungswuensche ueber Freigabeprozess",
+            ],
+        },
+        "stats": stats,
+        "courses": courses,
+        "profiles": profiles,
+        "leads": leads,
+        "documents": documents,
+        "reports": reports,
+        "generated_at": now(),
+    }
+
+
+def portal_headers() -> dict[str, str]:
+    return {
+        "Cache-Control": "no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+    }
+
+
+def render_school_portal_html(data: dict[str, Any], token: str) -> str:
+    def e(v: Any) -> str:
+        return html.escape(str(v or ""))
+
+    school = data["school"]
+    tariff = data["tariff"]
+    stats = data["stats"]
+    course_rows = "".join(
+        f"<tr><td><b>{e(c['name'])}</b></td><td>{e(c['funding'])}</td><td>{e(c['remote'])}</td><td>{e(c['status'])}</td><td>{e(c['fit_score'])}%</td></tr>"
+        for c in data["courses"]
+    ) or "<tr><td colspan='5' class='empty'>Noch keine Kurse freigegeben.</td></tr>"
+    lead_rows = "".join(
+        f"<tr><td><b>{e(l['title'])}</b><br><span>{e(l['provider'])}</span></td><td>{e(l['course_name'])}</td><td>{e(l['score'])}%</td><td>{e(l['why_fit'])}</td></tr>"
+        for l in data["leads"]
+    ) or "<tr><td colspan='4' class='empty'>Noch keine freigegebenen Matches.</td></tr>"
+    report_rows = "".join(
+        f"<tr><td>{e(r['report_type'])}</td><td>{e(r['period_start'])} – {e(r['period_end'])}</td><td>{e(r['status'])}</td></tr>"
+        for r in data["reports"]
+    ) or "<tr><td colspan='3' class='empty'>Noch keine Reports freigegeben.</td></tr>"
+    profile_cards = "".join(
+        f"<section class='mini'><h3>{e(p['course_name'])}</h3><p><b>Zielrollen:</b> {e(', '.join(p['target_titles'][:5]))}</p><p><b>Skills:</b> {e(', '.join(p['skills'][:8]))}</p><p><b>Region:</b> {e(p['location_rules'])}</p></section>"
+        for p in data["profiles"]
+    ) or "<p class='muted'>Noch keine Suchprofile freigegeben.</p>"
+    included = "".join(f"<li>{e(x)}</li>" for x in tariff["included"])
+    return f"""<!doctype html><html lang='de'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'>
+<title>JobRadar Schulportal – {e(school['name'])}</title>
+<style>
+:root{{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--brand:#2563eb;--ok:#059669}}
+*{{box-sizing:border-box}}body{{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;background:#f8fafc;color:var(--ink)}}
+.wrap{{max-width:1180px;margin:0 auto;padding:28px 20px}}.hero{{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:white;padding:48px 0}}
+.badge{{display:inline-flex;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;color:#dbeafe;font-size:12px;font-weight:700}}
+h1{{font-size:clamp(32px,5vw,56px);line-height:1.02;margin:18px 0 12px;letter-spacing:-.04em}}p{{line-height:1.6}}.muted{{color:var(--muted)}}
+.grid{{display:grid;gap:16px}}.kpis{{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:22px}}.card{{background:white;border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 12px 28px rgba(15,23,42,.06)}}
+.kpi b{{display:block;font-size:28px}}.kpi span{{color:var(--muted);font-size:13px}}.cols{{grid-template-columns:1fr 2fr}}table{{width:100%;border-collapse:collapse;font-size:14px}}th,td{{text-align:left;border-bottom:1px solid #eef2f7;padding:12px;vertical-align:top}}th{{color:#475569;background:#f8fafc;font-size:12px;text-transform:uppercase;letter-spacing:.04em}}td span{{color:var(--muted);font-size:12px}}.empty{{text-align:center;color:#94a3b8;padding:28px}}.mini{{border:1px solid #e2e8f0;border-radius:14px;padding:14px;margin:10px 0;background:#fbfdff}}.safe{{background:#0f172a;color:white}}.safe li{{margin:8px 0;color:#cbd5e1}}a.btn{{display:inline-flex;gap:8px;align-items:center;border-radius:12px;background:white;color:#0f172a;padding:11px 14px;text-decoration:none;font-weight:700;margin-right:8px}}a.btn.secondary{{background:#dbeafe;color:#1e40af}}@media(max-width:800px){{.kpis,.cols{{grid-template-columns:1fr}}}}
+</style></head><body>
+<header class='hero'><div class='wrap'><span class='badge'>JobRadar Schulportal · read-only · noindex</span><h1>{e(school['name'])}</h1><p>Ihre freigegebene Sicht auf Kurse, Suchprofile, gepruefte Matches und Reports. Interne Kosten, Rohdaten, Logs und andere Schulen bleiben verborgen.</p><p><a class='btn' href='/school/{e(token)}/report.html'>HTML-Report</a><a class='btn secondary' href='/school/{e(token)}/report.csv'>CSV herunterladen</a></p></div></header>
+<main class='wrap'>
+<section class='grid kpis'><div class='card kpi'><b>{stats['courses']}</b><span>Kurse</span></div><div class='card kpi'><b>{stats['profiles']}</b><span>Suchprofile</span></div><div class='card kpi'><b>{stats['approved_matches']}</b><span>freigegebene Matches</span></div><div class='card kpi'><b>{stats['reports']}</b><span>Reports</span></div></section>
+<section class='grid cols' style='margin-top:16px'><div class='card'><h2>Tarif & Leistung</h2><p><b>{e(tariff['plan'])}</b><br>{e(tariff['price_eur'])} € / Monat<br><span class='muted'>{e(tariff['valid_until'])}</span></p><ul>{included}</ul></div><div class='card'><h2>Kurse</h2><table><tr><th>Kurs</th><th>Foerderung</th><th>Remote</th><th>Status</th><th>Fit</th></tr>{course_rows}</table></div></section>
+<section class='card' style='margin-top:16px'><h2>Suchprofile</h2>{profile_cards}</section>
+<section class='card' style='margin-top:16px'><h2>Freigegebene Matches</h2><p class='muted'>Nur portal-sichtbare Treffer; Kandidaten in QA, Rejected Leads und interne Notizen werden nicht angezeigt.</p><table><tr><th>Rolle</th><th>Kurs</th><th>Fit</th><th>Warum passend</th></tr>{lead_rows}</table></section>
+<section class='card' style='margin-top:16px'><h2>Reports</h2><table><tr><th>Typ</th><th>Zeitraum</th><th>Status</th></tr>{report_rows}</table></section>
+<section class='card safe' style='margin-top:16px'><h2>Bewusst verborgen</h2><ul><li>interne Parser-/LLM-/n8n-/Hostingkosten und Marge</li><li>Rohdaten, Scraping-Logs, Prompts, Credentials und Webhooks</li><li>andere Schulen, abgelehnte Treffer und interne QA-Notizen</li></ul></section>
+<p class='muted'>Generiert: {e(data['generated_at'])}</p>
+</main></body></html>"""
+
+
+
+# ── Job Pool & Manual Add ─────────────────────────────────────────────────────
+
+def _similar_title_duplicates(lead_id: int, title: str) -> list:
+    words = {
+        w for w in "".join(
+            ch.lower() if ch.isalnum() else " "
+            for ch in (title or "")
+        ).split()
+        if len(w) >= 4
+    }
+    if not words:
+        return []
+    result = []
+    for row in rows(
+        "SELECT id,title FROM leads WHERE id<>? AND lower(status) IN ('new','candidate','approved')",
+        (lead_id,),
+    ):
+        other = {
+            w for w in "".join(
+                ch.lower() if ch.isalnum() else " "
+                for ch in (row.get("title") or "")
+            ).split()
+            if len(w) >= 4
+        }
+        if other and len(words & other) / max(1, min(len(words), len(other))) >= 0.6:
+            result.append(int(row["id"]))
+    return result[:8]
+
+
+
+def _record_notification(event_type: str, lead_id: int, school_id: int | None, email: str, status: str, error: str = "") -> None:
+    try:
+        exec_sql(
+            """INSERT INTO notification_events(event_type,lead_id,school_id,to_email,status,error,created_at)
+               VALUES(?,?,?,?,?,?,?)""",
+            (event_type, lead_id, int(school_id or 0), email, status, error[:500], now()),
+        )
+    except Exception:
+        pass
+
+
+def _notify_school_new_lead(lead_id: int, school_id: int | None, note: str = "") -> int:
+    """Best-effort customer-safe notification hook for approved leads.
+
+    Sends to n8n if JOBRADAR_APPROVE_NOTIFY_WEBHOOK or JOBRADAR_NOTIFY_WEBHOOK_URL
+    is configured. No secrets/tokens are printed or exposed in API responses.
+    Missing webhook/contact emails must not block approve.
+    """
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        _record_notification("job_approved_for_school", lead_id, school_id, "", "skipped_no_webhook")
+        return 0
+    lead = one("SELECT id,title,provider,score,why_fit,updated_at FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        _record_notification("job_approved_for_school", lead_id, school_id, "", "skipped_missing_lead")
+        return 0
+    targets = []
+    if school_id is None:
+        targets = rows("""SELECT id,name,contact_email,portal_token
+                          FROM schools
+                          WHERE status<>'archived' AND portal_enabled=1
+                            AND COALESCE(contact_email,'')<>''""")
+    else:
+        school = one("""SELECT id,name,contact_email,portal_token
+                        FROM schools
+                        WHERE id=? AND status<>'archived'""", (school_id,))
+        if school:
+            targets = [school]
+    import urllib.request as _ur, json as _j
+    sent_count = 0
+    for school in targets:
+        email = (school.get("contact_email") or "").strip()
+        if not email:
+            _record_notification("job_approved_for_school", lead_id, school.get("id"), "", "skipped_no_email")
+            continue
+        portal_url = ""
+        if school.get("portal_token"):
+            portal_url = f"{PUBLIC_BASE_URL}/school/{school['portal_token']}"
+        payload = {
+            "event": "job_approved_for_school",
+            "school_id": school["id"],
+            "school_name": school["name"],
+            "to_email": email,
+            "subject": "Neue gepruefte Stelle in Ihrem JobRadar Portal",
+            "lead": {
+                "id": lead["id"],
+                "title": lead["title"],
+                "provider": lead["provider"],
+                "score": lead["score"],
+                "why_fit": lead["why_fit"],
+            },
+            "portal_url": portal_url,
+            "note": note,
+        }
+        try:
+            req = _ur.Request(webhook, data=_j.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+            _ur.urlopen(req, timeout=10).read(256)
+            sent_count += 1
+            _record_notification("job_approved_for_school", lead_id, school["id"], email, "sent")
+        except Exception as exc:
+            _record_notification("job_approved_for_school", lead_id, school["id"], email, "error", str(exc))
+    return sent_count
+
+
+@app.get("/api/leads/pending")
+def leads_pending() -> dict:
+    init_db()
+    pending = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.why_fit,l.missing_evidence,
+                  l.risks,l.sources,l.status,l.updated_at
+             FROM leads l WHERE lower(l.status) IN ('new','candidate')
+             ORDER BY l.score DESC""")
+    for lead in pending:
+        lead["duplicates"] = _similar_title_duplicates(int(lead["id"]), lead.get("title") or "")
+    schools_list = rows("SELECT id,name FROM schools WHERE status<>'archived' ORDER BY name")
+    return {"leads": pending, "schools": schools_list}
+
+
+@app.get("/api/pool")
+def leads_pool() -> dict:
+    init_db()
+    pool = rows(
+        """SELECT
+             l.id, l.title, l.provider, l.score, l.why_fit, l.status, l.updated_at,
+             CASE
+               WHEN SUM(CASE WHEN ja.school_id IS NULL THEN 1 ELSE 0 END) > 0
+                 THEN 'Alle Schulen'
+               ELSE COALESCE(GROUP_CONCAT(s.name, ' · '), 'Nicht zugewiesen')
+             END AS assigned_to,
+             CASE
+               WHEN SUM(CASE WHEN ja.school_id IS NULL THEN 1 ELSE 0 END) > 0
+                 THEN 0
+               ELSE COUNT(ja.school_id)
+             END AS assigned_count
+           FROM leads l
+           LEFT JOIN job_assignments ja ON ja.lead_id = l.id
+           LEFT JOIN schools s ON s.id = ja.school_id
+           WHERE lower(l.status) = 'approved'
+           GROUP BY l.id
+           ORDER BY l.score DESC""")
+    return {"leads": pool}
+
+
+@app.post("/api/leads/{lead_id}/approve")
+def approve_lead(lead_id: int, body: dict) -> dict:
+    init_db()
+    lead = one("SELECT id FROM leads WHERE id=?", (lead_id,))
+    if not lead:
+        raise HTTPException(404, "lead not found")
+    school_ids = body.get("school_ids", [])
+    note = body.get("note", "")
+    exec_sql("UPDATE leads SET status='Approved',updated_at=? WHERE id=?", (now(), lead_id))
+    exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
+    notification_count = 0
+    quota_exceeded: list[dict] = []
+    if school_ids:
+        for sid in school_ids:
+            school_id = int(sid)
+            school_row = one("SELECT name FROM schools WHERE id=?", (school_id,))
+            if school_row:
+                pass
+            exec_sql(
+                "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,?,?,?)",
+                (lead_id, school_id, note, now()))
+            notification_count += _notify_school_new_lead(lead_id, school_id, note)
+        assigned = len(school_ids) - len(quota_exceeded)
+    else:
+        exec_sql(
+            "INSERT INTO job_assignments(lead_id,school_id,note,assigned_at) VALUES(?,NULL,?,?)",
+            (lead_id, note, now()))
+        assigned = 0
+        notification_count = _notify_school_new_lead(lead_id, None, note)
+    return {"ok": True, "assigned_to": assigned, "notification_count": notification_count, "quota_exceeded": quota_exceeded}
+
+
+@app.post("/api/leads/{lead_id}/reject")
+def reject_lead(lead_id: int) -> dict:
+    init_db()
+    exec_sql("UPDATE leads SET status='Rejected',updated_at=? WHERE id=?", (now(), lead_id))
+    exec_sql("DELETE FROM job_assignments WHERE lead_id=?", (lead_id,))
+    return {"ok": True}
+
+
+@app.get("/admin/pool", response_class=HTMLResponse)
+def admin_pool(request: Request):
+    init_db()
+    pending = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.why_fit,l.status,l.updated_at
+             FROM leads l WHERE lower(l.status) IN ('new','candidate')
+             ORDER BY l.score DESC""")
+    approved = rows(
+        """SELECT l.id,l.title,l.provider,l.score,l.status,l.updated_at,
+                  COALESCE(GROUP_CONCAT(s.name,' · '),'Alle Schulen') AS assigned_to
+             FROM leads l
+             LEFT JOIN job_assignments ja ON ja.lead_id=l.id
+             LEFT JOIN schools s ON s.id=ja.school_id
+             WHERE lower(l.status)='approved'
+             GROUP BY l.id ORDER BY l.score DESC""")
+    schools_list = rows("SELECT id,name FROM schools WHERE status<>'archived' ORDER BY name")
+
+    def sc(v):
+        v = int(v or 0)
+        return "#22c55e" if v >= 80 else "#f59e0b" if v >= 60 else "#ef4444"
+
+    school_opts = "".join(
+        "<label style='display:block;margin:4px 0'>"
+        "<input type='checkbox' name='sid' value='" + str(s["id"]) + "'> " + e(s["name"]) + "</label>"
+        for s in schools_list)
+
+    def prow(l):
+        sid = l["id"]; sc_ = sc(l["score"]); score = l["score"]
+        title = e(l["title"]); prov = e(l["provider"])
+        why = e((l["why_fit"] or "")[:80])
+        return (
+            "<tr><td><b style='color:" + sc_ + "'>" + str(score) + "</b></td>"
+            "<td>" + title + "</td><td>" + prov + "</td>"
+            "<td style='font-size:13px;color:#64748b'>" + why + "</td>"
+            "<td>"
+            "<button onclick='openApprove(" + str(sid) + ","" + title + "")' class='bok'>&#10003; Freigeben</button> "
+            "<button onclick='doReject(" + str(sid) + ")' class='bno'>&#10007; Ablehnen</button>"
+            "</td></tr>")
+
+    def arow(l):
+        sid = l["id"]; sc_ = sc(l["score"]); score = l["score"]
+        title = e(l["title"]); prov = e(l["provider"])
+        assigned = e(l["assigned_to"] or "Alle Schulen")
+        date = (l["updated_at"] or "")[:10]
+        return (
+            "<tr><td><b style='color:" + sc_ + "'>" + str(score) + "</b></td>"
+            "<td>" + title + "</td><td>" + prov + "</td>"
+            "<td>" + assigned + "</td>"
+            "<td>" + date + "</td>"
+            "<td><button onclick='doReject(" + str(sid) + ")' class='bno'>Widerrufen</button></td></tr>")
+
+    prows = "".join(prow(l) for l in pending) or "<tr><td colspan=5 style='text-align:center;padding:20px;color:#94a3b8'>Keine offenen Stellen</td></tr>"
+    arows = "".join(arow(l) for l in approved) or "<tr><td colspan=6 style='text-align:center;padding:20px;color:#94a3b8'>Noch keine freigegebenen Stellen</td></tr>"
+
+    html = f"""<!DOCTYPE html><html><head><meta charset='utf-8'><title>Job Pool</title>
+<style>
+body{{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}}
+nav{{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}}
+nav a{{color:#94a3b8;text-decoration:none;font-size:14px}}nav a:hover{{color:#fff}}
+nav b{{color:#fff}}
+.wrap{{max-width:1100px;margin:28px auto;padding:0 20px}}
+h2{{margin:24px 0 10px;font-size:18px}}
+table{{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}}
+th{{background:#f1f5f9;padding:9px 12px;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase}}
+td{{padding:9px 12px;border-top:1px solid #f1f5f9;font-size:13px}}
+.bok{{background:#22c55e;color:#fff;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}}
+.bno{{background:#ef4444;color:#fff;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px}}
+.overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50;align-items:center;justify-content:center}}
+.overlay.on{{display:flex}}
+.modal{{background:#fff;border-radius:12px;padding:24px;min-width:340px;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,.18)}}
+.modal h3{{margin:0 0 8px}}.modal p{{color:#64748b;margin:0 0 14px;font-size:14px}}
+textarea{{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:6px;padding:8px;font-size:13px}}
+.mact{{margin-top:14px;display:flex;gap:8px;justify-content:flex-end}}
+.mbtn{{padding:8px 16px;border:1px solid #e2e8f0;background:#fff;border-radius:6px;cursor:pointer;font-size:13px}}
+</style></head><body>
+<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>
+<div class='wrap'>
+  <h2>Zur Pruefung ({len(pending)})</h2>
+  <table><thead><tr><th>Score</th><th>Titel</th><th>Anbieter</th><th>Warum passend</th><th>Aktion</th></tr></thead>
+  <tbody>{prows}</tbody></table>
+  <h2>Freigegeben ({len(approved)})</h2>
+  <table><thead><tr><th>Score</th><th>Titel</th><th>Anbieter</th><th>Zugewiesen</th><th>Datum</th><th>Aktion</th></tr></thead>
+  <tbody>{arows}</tbody></table>
+</div>
+<div class='overlay' id='ov'>
+  <div class='modal'>
+    <h3>Stelle freigeben</h3>
+    <p id='mt'></p>
+    <b style='font-size:13px'>Schulen:</b>
+    <label style='display:block;margin:8px 0 4px;font-size:13px'><input type='checkbox' id='allCb' checked onchange='toggleAll(this)'> <b>Alle Schulen</b></label>
+    <div id='scb' style='margin-left:16px;opacity:.4;pointer-events:none;font-size:13px'>{school_opts}</div>
+    <br><b style='font-size:13px'>Notiz (optional):</b>
+    <textarea id='note' rows='3' placeholder='z.B. Gute Remote-Option...'></textarea>
+    <div class='mact'>
+      <button class='mbtn' onclick='closeM()'>Abbrechen</button>
+      <button class='bok' style='padding:8px 16px' onclick='submitApprove()'>Freigeben</button>
+    </div>
+  </div>
+</div>
+<script>
+let cid=null;
+function openApprove(id,t){{cid=id;document.getElementById('mt').textContent=t;document.getElementById('ov').classList.add('on');}}
+function closeM(){{document.getElementById('ov').classList.remove('on');cid=null;}}
+function toggleAll(cb){{const d=document.getElementById('scb');d.style.opacity=cb.checked?'.4':'1';d.style.pointerEvents=cb.checked?'none':'auto';d.querySelectorAll('input').forEach(i=>i.checked=false);}}
+async function submitApprove(){{
+  const all=document.getElementById('allCb').checked;
+  const sids=all?[]:[...document.querySelectorAll('#scb input:checked')].map(i=>+i.value);
+  const note=document.getElementById('note').value;
+  await fetch('/api/leads/'+cid+'/approve',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{school_ids:sids,note}})}});
+  closeM();location.reload();
+}}
+async function doReject(id){{if(!confirm('Ablehnen?'))return;await fetch('/api/leads/'+id+'/reject',{{method:'POST'}});location.reload();}}
+</script></body></html>"""
+    return HTMLResponse(html)
+
+
+@app.get("/admin/add-job", response_class=HTMLResponse)
+def admin_add_job_form(request: Request):
+    html = """<!DOCTYPE html><html><head><meta charset='utf-8'><title>Stelle hinzufuegen</title>
+<style>
+body{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}
+nav{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}
+nav a{color:#94a3b8;text-decoration:none;font-size:14px}nav a:hover{color:#fff}
+nav b{color:#fff}
+.wrap{max-width:620px;margin:40px auto;padding:0 20px}
+.card{background:#fff;border-radius:12px;padding:28px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+label{display:block;font-weight:500;margin:14px 0 5px;font-size:14px}
+input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:14px;font-family:inherit}
+textarea{resize:vertical}
+.btn{background:#1e293b;color:#fff;border:none;padding:11px 20px;border-radius:8px;cursor:pointer;font-size:14px;width:100%;margin-top:18px}
+.ok{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:14px;margin-top:14px;display:none}
+</style></head><body>
+<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>
+<div class='wrap'><div class='card'>
+  <h2 style='margin-top:0'>Stelle manuell hinzufuegen</h2>
+  <p style='color:#64748b;font-size:14px'>Die Stelle wird in der Pruefungswarteschlange angezeigt.</p>
+  <form id='f'>
+    <label>URL (optional)</label>
+    <input type='url' name='url' placeholder='https://jobs.example.com/...' />
+    <label>Beschreibungstext (URL oder Text einfuegen)</label>
+    <textarea name='description' rows='8' placeholder='Jobbeschreibung einfuegen...'></textarea>
+    <label>Quelle</label>
+    <select name='source'>
+      <option>ChatGPT DeepSearch</option><option>Hermes</option>
+      <option>LinkedIn</option><option>Stepstone</option>
+      <option>Indeed</option><option>Remotive</option><option>Andere</option>
+    </select>
+    <button type='submit' class='btn'>Zur Pruefung einreichen</button>
+  </form>
+  <div class='ok' id='ok'>Eingereicht! Erscheint in Kuerze im <a href='/admin/pool'>Job Pool</a>.</div>
+</div></div>
+<script>
+document.getElementById('f').onsubmit=async(e)=>{
+  e.preventDefault();
+  const fd=new FormData(e.target);
+  await fetch('/admin/add-job',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(fd)});
+  document.getElementById('ok').style.display='block';
+  e.target.reset();
+};
+</script></body></html>"""
+    return HTMLResponse(html)
+
+
+@app.post("/admin/add-job")
+def admin_add_job_submit(
+    url: str = Form(default=""),
+    description: str = Form(default=""),
+    source: str = Form(default="Andere"),
+):
+    import urllib.request as _ur, json as _j
+    raw = description.strip() or url.strip()
+    if not raw:
+        raise HTTPException(400, "URL oder Beschreibung erforderlich")
+    payload = {
+        "input_source": "manual", "source_detail": "manual_text",
+        "subject": f"[{source}] {url or 'Manual Entry'}",
+        "raw_text": raw, "raw_meta": {"url": url, "source_label": source},
+    }
+    webhook = MANUAL_JOB_WEBHOOK
+    if not webhook:
+        return {"ok": False, "queued": False, "reason": "manual_job_webhook_not_configured"}
+    req = _ur.Request(
+        webhook,
+        data=_j.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        _ur.urlopen(req, timeout=10)
+        return {"ok": True, "queued": True}
+    except Exception as exc:
+        return {"ok": False, "queued": False, "reason": "webhook_error", "error": str(exc)[:200]}
+
+
+
+def admin_nav() -> str:
+    return "<nav><b>JobRadar</b><a href='/'>Dashboard</a><a href='/admin/schools'>Schulen</a><a href='/admin/registrations'>Anmeldungen</a><a href='/admin/pool'>Job Pool</a><a href='/admin/add-job'>+ Stelle</a></nav>"
+
+
+def status_options(current: Any) -> str:
+    cur = str(current or "active")
+    opts = ["lead", "active", "review", "risk", "archived"]
+    return "".join(f"<option {'selected' if o == cur else ''}>{o}</option>" for o in opts)
+
+
+def admin_style() -> str:
+    return """<style>
+body{font-family:system-ui;margin:0;background:#f8fafc;color:#1e293b}nav{background:#1e293b;padding:12px 24px;display:flex;gap:20px;align-items:center}nav a{color:#94a3b8;text-decoration:none;font-size:14px}nav a:hover{color:#fff}nav b{color:#fff}.wrap{max-width:1180px;margin:28px auto;padding:0 20px}.card{background:#fff;border-radius:12px;padding:22px;margin:18px 0;box-shadow:0 1px 3px rgba(0,0,0,.08)}.mini{border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:16px 0;background:#fbfdff}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:600;color:#334155}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font:inherit;margin-top:5px}textarea{resize:vertical}.actions{text-align:right;align-self:end}button,.btn{background:#1e293b;color:#fff;border:none;border-radius:8px;padding:9px 14px;text-decoration:none;display:inline-block;cursor:pointer}.primary{background:#2563eb}.small{font-size:12px;padding:6px 10px}table{width:100%;border-collapse:collapse}th{background:#f1f5f9;text-align:left;font-size:12px;color:#64748b;text-transform:uppercase;padding:9px}td{border-top:1px solid #eef2f7;padding:10px;font-size:14px;vertical-align:top}span,.muted{color:#64748b}.portalbox{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px;margin-top:14px;word-break:break-all}.profile{margin-top:12px;border-top:1px dashed #cbd5e1;padding-top:12px}@media(max-width:800px){.grid2{grid-template-columns:1fr}.wide{grid-column:auto}}</style>"""
+
+
+def registration_status_badge(status: Any) -> str:
+    value = str(status or "pending")
+    colors = {"pending": "#f59e0b", "approved": "#16a34a", "rejected": "#64748b"}
+    color = colors.get(value, "#64748b")
+    return f"<span style='display:inline-block;border-radius:999px;background:{color};color:white;padding:3px 9px;font-size:12px;font-weight:700'>{e(value)}</span>"
+
+
+def _registration_notify(payload: dict[str, Any]) -> None:
+    """Best-effort notification for new school self-registrations."""
+    webhook = REGISTRATION_WEBHOOK or os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return
+    import urllib.request as _ur, json as _j
+    data = {
+        "event": "school_registration",
+        "to_email": "kontakt@kibrueg.de",
+        "subject": f"Neue JobRadar Schul-Anmeldung: {payload.get('name','')}",
+        **payload,
+    }
+    try:
+        req = _ur.Request(webhook, data=_j.dumps(data).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+    except Exception:
+        # Registration must never fail because the notification hook is unavailable.
+        pass
+
+
+@app.get("/register", response_class=HTMLResponse)
+def school_register_form(request: Request):
+    init_db()
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'><title>Schule anmelden · JobRadar</title>
+<style>
+:root{color-scheme:light;--ink:#172033;--muted:#64748b;--line:#dbe3ef;--brand:#2563eb;--bg:#f8fafc}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.hero{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:white;padding:44px 0}.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+.badge{display:inline-flex;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:6px 10px;color:#dbeafe;font-size:12px;font-weight:700}
+h1{font-size:clamp(32px,5vw,52px);line-height:1.02;margin:18px 0 12px;letter-spacing:-.04em}p{line-height:1.6}.muted{color:var(--muted)}
+.card{background:white;border:1px solid var(--line);border-radius:18px;padding:24px;margin:24px auto;box-shadow:0 12px 28px rgba(15,23,42,.06)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.wide{grid-column:1/-1}label{display:block;font-size:13px;font-weight:700;color:#334155}
+input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #dbe3ef;border-radius:12px;padding:11px 12px;font:inherit;margin-top:6px;background:#fff}textarea{resize:vertical}
+button{background:#2563eb;color:#fff;border:0;border-radius:12px;padding:12px 18px;font-weight:800;cursor:pointer}.note{background:#eff6ff;border:1px solid #bfdbfe;border-radius:14px;padding:14px;color:#1e40af}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}}
+</style></head><body><header class='hero'><div class='wrap'><span class='badge'>JobRadar · Schul-Anmeldung</span><h1>Arbeitsmarkt-Radar fuer Ihre Weiterbildung</h1><p>Reichen Sie Ihre Schule ein. Wir pruefen den Pilotzugang und melden uns innerhalb von 24 Stunden.</p></div></header>
+<main class='wrap'><section class='card'><h2>Schule anmelden</h2><p class='muted'>Keine Teilnehmerdaten erforderlich. Wir benoetigen nur Kontaktdaten fuer die Pilot-Abstimmung.</p>
+<form method='post' action='/register' class='grid'>
+<label>Schulname<input name='name' required maxlength='160' autocomplete='organization'></label>
+<label>Ansprechpartner<input name='contact_person' required maxlength='160' autocomplete='name'></label>
+<label>E-Mail<input name='email' type='email' required maxlength='180' autocomplete='email'></label>
+<label>Plan<select name='plan'><option value='pilot'>Pilot</option><option value='basic'>Basic</option><option value='pro'>Pro</option></select></label>
+<label class='wide'>Nachricht<textarea name='message' rows='5' maxlength='2000' placeholder='Welche Kurse / Standorte / Zielrollen sind fuer Sie relevant?'></textarea></label>
+<div class='wide note'>Nach dem Absenden speichern wir die Anfrage intern und kontaktieren Sie unter der angegebenen E-Mail-Adresse.</div>
+<div class='wide' style='text-align:right'><button>Absenden</button></div>
+</form></section></main></body></html>""")
+
+
+@app.post("/register", response_class=HTMLResponse)
+def school_register_submit(
+    name: str = Form(...), contact_person: str = Form(...), email: str = Form(...),
+    plan: str = Form("pilot"), message: str = Form(""),
+):
+    init_db()
+    clean_name = name.strip()
+    clean_contact = contact_person.strip()
+    clean_email = email.strip().lower()
+    clean_plan = plan.strip().lower()
+    if clean_plan not in {"pilot", "basic", "pro"}:
+        clean_plan = "pilot"
+    if not clean_name or not clean_contact or "@" not in clean_email:
+        raise HTTPException(400, "valid school, contact person and email required")
+    reg_id = exec_sql(
+        """INSERT INTO school_registrations(name,contact_person,email,plan,message,created_at,status)
+           VALUES(?,?,?,?,?,?, 'pending')""",
+        (clean_name[:160], clean_contact[:160], clean_email[:180], clean_plan, message.strip()[:2000], now()),
+    )
+    _registration_notify({
+        "registration_id": reg_id,
+        "name": clean_name[:160],
+        "contact_person": clean_contact[:160],
+        "email": clean_email[:180],
+        "plan": clean_plan,
+        "message": message.strip()[:2000],
+        "admin_url": f"{PUBLIC_BASE_URL}/admin/registrations",
+    })
+    return HTMLResponse("""<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Danke · JobRadar</title><style>body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f8fafc;color:#172033}.wrap{max-width:720px;margin:80px auto;padding:0 20px}.card{background:white;border:1px solid #dbe3ef;border-radius:18px;padding:32px;box-shadow:0 12px 28px rgba(15,23,42,.06)}.ok{display:inline-flex;background:#dcfce7;color:#166534;border-radius:999px;padding:6px 10px;font-weight:800;font-size:12px}a{color:#2563eb}</style></head>
+<body><main class='wrap'><section class='card'><span class='ok'>Anfrage erhalten</span><h1>Vielen Dank.</h1><p>Wir melden uns innerhalb von 24 Stunden bei Ihnen.</p><p><a href='/'>Zurueck zur Startseite</a></p></section></main></body></html>""")
+
+
+@app.get("/admin/registrations", response_class=HTMLResponse)
+def admin_registrations_page(request: Request):
+    init_db()
+    registrations = rows("SELECT * FROM school_registrations ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, created_at DESC")
+    def row(r: dict[str, Any]) -> str:
+        actions = ""
+        if str(r.get("status") or "pending") == "pending":
+            actions = (
+                f"<form method='post' action='/admin/registrations/{r['id']}/approve' style='display:inline'><button class='primary small'>Schule anlegen</button></form> "
+                f"<form method='post' action='/admin/registrations/{r['id']}/reject' style='display:inline'><button class='small' style='background:#64748b'>Ablehnen</button></form>"
+            )
+        else:
+            actions = "<span class='muted'>abgeschlossen</span>"
+        return (
+            f"<tr><td><b>{e(r['name'])}</b><br><span>{e(r.get('created_at',''))}</span></td>"
+            f"<td>{e(r['contact_person'])}<br><span>{e(r['email'])}</span></td>"
+            f"<td>{e(r.get('plan','pilot'))}</td><td>{registration_status_badge(r.get('status'))}</td>"
+            f"<td>{e(r.get('message',''))}</td><td>{actions}</td></tr>"
+        )
+    body = "".join(row(r) for r in registrations) or "<tr><td colspan='6'>Noch keine Anmeldungen.</td></tr>"
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><title>Schul-Anmeldungen</title>{admin_style()}</head><body>
+{admin_nav()}<main class='wrap'><h1>Schul-Anmeldungen</h1><p class='muted'>Anfragen aus der oeffentlichen /register-Form. Approve legt eine Schule als Lead an; Kurse/Suchprofile werden danach in der Schul-Detailseite gepflegt.</p>
+<section class='card'><table><thead><tr><th>Schule</th><th>Kontakt</th><th>Plan</th><th>Status</th><th>Nachricht</th><th>Aktion</th></tr></thead><tbody>{body}</tbody></table></section></main></body></html>"""
+    return HTMLResponse(html_doc)
+
+
+@app.post("/admin/registrations/{registration_id}/approve")
+def admin_registration_approve(registration_id: int):
+    init_db()
+    reg = one("SELECT * FROM school_registrations WHERE id=?", (registration_id,))
+    if not reg:
+        raise HTTPException(404, "registration not found")
+    if reg.get("status") == "approved":
+        existing = one("SELECT id FROM schools WHERE name=?", (reg["name"],))
+        return Response(status_code=303, headers={"Location": f"/admin/schools/{existing['id']}" if existing else "/admin/registrations"})
+    existing = one("SELECT id FROM schools WHERE name=?", (reg["name"].strip(),))
+    note = f"Registration #{registration_id}; Ansprechpartner: {reg['contact_person']}; Plan: {reg.get('plan') or 'pilot'}; Nachricht: {reg.get('message') or ''}"
+    if existing:
+        school_id = int(existing["id"])
+        exec_sql("UPDATE schools SET contact_email=COALESCE(NULLIF(contact_email,''),?), note=CASE WHEN COALESCE(note,'')='' THEN ? ELSE note END, updated_at=? WHERE id=?", (reg["email"], note[:1000], now(), school_id))
+    else:
+        school_id = exec_sql(
+            """INSERT INTO schools(name,website,contact_email,status,note,created_at,updated_at,portal_plan,portal_price_eur)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (reg["name"].strip(), "", reg["email"].strip(), "lead", note[:1000], now(), now(), f"{str(reg.get('plan') or 'pilot').title()} Portal", 49),
+        )
+    exec_sql("UPDATE school_registrations SET status='approved' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/registrations/{registration_id}/reject")
+def admin_registration_reject(registration_id: int):
+    init_db()
+    if not one("SELECT id FROM school_registrations WHERE id=?", (registration_id,)):
+        raise HTTPException(404, "registration not found")
+    exec_sql("UPDATE school_registrations SET status='rejected' WHERE id=?", (registration_id,))
+    return Response(status_code=303, headers={"Location": "/admin/registrations"})
+
+
+@app.get("/admin/schools", response_class=HTMLResponse)
+def admin_schools_page(request: Request):
+    init_db()
+    schools = rows("""SELECT s.*,
+                       COUNT(DISTINCT c.id) AS course_count,
+                       COUNT(DISTINCT sp.id) AS profile_count
+                    FROM schools s
+                    LEFT JOIN courses c ON c.school_id=s.id AND c.status<>'archived'
+                    LEFT JOIN search_profiles sp ON sp.course_id=c.id
+                    GROUP BY s.id
+                    ORDER BY CASE s.status WHEN 'active' THEN 0 WHEN 'lead' THEN 1 ELSE 2 END, s.name""")
+    def row(school: dict[str, Any]) -> str:
+        portal = "aktiv" if int(school.get("portal_enabled") or 0) else "aus"
+        price = school.get("portal_price_eur") or ""
+        return (
+            f"<tr><td><b>{e(school['name'])}</b><br><span>{e(school.get('website',''))}</span></td>"
+            f"<td>{e(school.get('contact_email',''))}</td><td>{e(school.get('status',''))}</td>"
+            f"<td>{school.get('course_count',0)} / {school.get('profile_count',0)}</td>"
+            f"<td>{portal}<br><span>{e(school.get('portal_plan',''))} · {e(price)} EUR</span></td>"
+            f"<td><a class='btn small' href='/admin/schools/{school['id']}'>Bearbeiten</a></td></tr>"
+        )
+    body = "".join(row(s) for s in schools) or "<tr><td colspan='6'>Noch keine Schulen.</td></tr>"
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><title>Schulen</title>{admin_style()}</head><body>
+{admin_nav()}<main class='wrap'><h1>Schulen</h1><p class='muted'>Neue Schulen ohne SSH/SQLite anlegen, Portal aktivieren und Kurse/Suchprofile pflegen.</p>
+<section class='card'><h2>Neue Schule</h2><form method='post' action='/admin/schools' class='grid2'>
+<label>Schulname<input name='name' required></label><label>Website<input name='website' placeholder='https://...'></label>
+<label>Kontakt E-Mail<input name='contact_email' type='email'></label><label>Status<select name='status'><option>lead</option><option selected>active</option><option>risk</option><option>archived</option></select></label>
+<label>Portal Plan<input name='portal_plan' value='Pilot Portal'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='49'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='50'></label>
+<label class='wide'>Notiz<textarea name='note' rows='3'></textarea></label><label><input type='checkbox' name='portal_enabled' value='1' checked> Portal aktivieren + Token erzeugen</label>
+<div class='actions wide'><button class='primary'>Schule anlegen</button></div></form></section>
+<section class='card'><h2>Bestehende Schulen</h2><table><thead><tr><th>Schule</th><th>Email</th><th>Status</th><th>Kurse/Profile</th><th>Portal</th><th></th></tr></thead><tbody>{body}</tbody></table></section>
+</main></body></html>"""
+    return HTMLResponse(html_doc)
+
+
+@app.post("/admin/schools")
+def admin_create_school(
+    name: str = Form(...), website: str = Form(""), contact_email: str = Form(""),
+    status: str = Form("active"), note: str = Form(""), portal_plan: str = Form("Pilot Portal"),
+    portal_price_eur: float = Form(49), portal_enabled: str | None = Form(default=None),
+):
+    init_db()
+    clean_name = name.strip()
+    if not clean_name:
+        raise HTTPException(400, "school name required")
+    token = new_portal_token() if portal_enabled else ""
+    sid = exec_sql(
+        """INSERT INTO schools(name,website,contact_email,status,note,created_at,updated_at,portal_token,portal_enabled,portal_plan,portal_price_eur)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (clean_name, website.strip(), contact_email.strip(), status.strip(), note.strip(), now(), now(), token, 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur),
+    )
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{sid}"})
+
+
+@app.get("/admin/schools/{school_id}", response_class=HTMLResponse)
+def admin_school_detail(school_id: int, request: Request):
+    init_db()
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    courses = rows("""SELECT c.*, sp.id AS profile_id, sp.access_mode, sp.target_titles, sp.skills, sp.location_rules,
+                            sp.language_rules, sp.exclude_titles, sp.source_queries, sp.coach_note, sp.active AS profile_active
+                     FROM courses c LEFT JOIN search_profiles sp ON sp.course_id=c.id
+                     WHERE c.school_id=? ORDER BY CASE c.status WHEN 'archived' THEN 1 ELSE 0 END, c.name""", (school_id,))
+    portal_url = ""
+    if school.get("portal_token"):
+        portal_url = "https://kibrueg.de/school/" + str(school["portal_token"])
+    def course_card(c: dict[str, Any]) -> str:
+        checked = "checked" if int(c.get("profile_active") or 0) else ""
+        return f"""<section class='mini'><h3>{e(c['name'])}</h3><form method='post' action='/admin/courses/{c['id']}' class='grid2'>
+<input type='hidden' name='school_id' value='{school_id}'><label>Kursname<input name='name' value='{e(c['name'])}' required></label><label>Status<select name='status'>{status_options(c.get('status'))}</select></label>
+<label>Funding<input name='funding' value='{e(c.get('funding',''))}'></label><label>Remote<input name='remote' value='{e(c.get('remote',''))}'></label>
+<label>Fit Score<input name='fit_score' type='number' min='0' max='100' value='{e(c.get('fit_score',0))}'></label>
+<div class='actions'><button>Kurs speichern</button></div></form>
+<form method='post' action='/admin/profiles/{c.get('profile_id') or 0}' class='grid2 profile'>
+<input type='hidden' name='course_id' value='{c['id']}'><label class='wide'>Target titles<textarea name='target_titles' rows='4'>{e(c.get('target_titles',''))}</textarea></label>
+<label class='wide'>Skills<textarea name='skills' rows='3'>{e(c.get('skills',''))}</textarea></label>
+<label>Location rules<textarea name='location_rules' rows='3'>{e(c.get('location_rules',''))}</textarea></label><label>Language rules<textarea name='language_rules' rows='3'>{e(c.get('language_rules',''))}</textarea></label>
+<label>Exclude titles<textarea name='exclude_titles' rows='3'>{e(c.get('exclude_titles',''))}</textarea></label><label>Source queries<textarea name='source_queries' rows='4'>{e(c.get('source_queries',''))}</textarea></label>
+<label class='wide'>Coach note<textarea name='coach_note' rows='3'>{e(c.get('coach_note',''))}</textarea></label><label><input type='checkbox' name='active' value='1' {checked}> Suchprofil aktiv</label>
+<div class='actions wide'><button>Suchprofil speichern</button></div></form></section>"""
+    course_blocks = "".join(course_card(c) for c in courses) or "<p class='muted'>Noch keine Kurse.</p>"
+    portal_anchor = ("<a href=\"" + e(portal_url) + "\" target=\"_blank\">" + e(portal_url) + "</a>") if portal_url else "noch kein Token"
+    html_doc = f"""<!doctype html><html><head><meta charset='utf-8'><title>{e(school['name'])}</title>{admin_style()}</head><body>
+{admin_nav()}<main class='wrap'><p><a href='/admin/schools'>← Schulen</a></p><h1>{e(school['name'])}</h1>
+<section class='card'><h2>Schule bearbeiten</h2><form method='post' action='/admin/schools/{school_id}' class='grid2'>
+<label>Schulname<input name='name' value='{e(school['name'])}' required></label><label>Website<input name='website' value='{e(school.get('website',''))}'></label>
+<label>Kontakt E-Mail<input name='contact_email' type='email' value='{e(school.get('contact_email',''))}'></label><label>Status<select name='status'>{status_options(school.get('status'))}</select></label>
+<label>Portal Plan<input name='portal_plan' value='{e(school.get('portal_plan','Pilot Portal'))}'></label><label>Preis EUR<input name='portal_price_eur' type='number' step='0.01' value='{e(school.get('portal_price_eur') or 49)}'></label><label>Stellen-Limit<input name='job_quota' type='number' min='1' value='{e(school.get('job_quota') or 50)}'></label>
+<label>Portal valid until<input name='portal_valid_until' value='{e(school.get('portal_valid_until',''))}'></label><label><input type='checkbox' name='portal_enabled' value='1' {'checked' if int(school.get('portal_enabled') or 0) else ''}> Portal aktiv</label>
+<label class='wide'>Portal note<textarea name='portal_note' rows='2'>{e(school.get('portal_note',''))}</textarea></label><label class='wide'>Interne Notiz<textarea name='note' rows='3'>{e(school.get('note',''))}</textarea></label>
+<div class='actions wide'><button class='primary'>Schule speichern</button></div></form>
+<div class='portalbox'><b>Portal-Link:</b> {portal_anchor}
+<form method='post' action='/admin/schools/{school_id}/token' style='display:inline'><button class='small'>Token erzeugen/aktivieren</button></form></div></section>
+<section class='card'><h2>Neuen Kurs + Suchprofil anlegen</h2><form method='post' action='/admin/courses' class='grid2'>
+<input type='hidden' name='school_id' value='{school_id}'><label>Kursname<input name='name' required></label><label>Funding<input name='funding' placeholder='AZAV / Bildungsgutschein'></label>
+<label>Remote<input name='remote' value='Remote DE/EU bevorzugt'></label><label>Fit Score<input name='fit_score' type='number' min='0' max='100' value='80'></label>
+<label class='wide'>Target titles<textarea name='target_titles' rows='4' placeholder='AI Automation Specialist\nn8n Automation Builder'></textarea></label><label class='wide'>Skills<textarea name='skills' rows='3'></textarea></label>
+<label>Location rules<textarea name='location_rules' rows='3'>Remote Germany / EU preferred</textarea></label><label>Language rules<textarea name='language_rules' rows='3'>German/English, junior or entry-level</textarea></label>
+<label>Exclude titles<textarea name='exclude_titles' rows='3'>Senior, Lead, Manager, pure sales, on-site only</textarea></label><label>Source queries<textarea name='source_queries' rows='4'></textarea></label>
+<label class='wide'>Coach note<textarea name='coach_note' rows='3'></textarea></label><div class='actions wide'><button class='primary'>Kurs + Suchprofil anlegen</button></div></form></section>
+<section class='card'><h2>Kurse & Suchprofile</h2>{course_blocks}</section></main></body></html>"""
+    return HTMLResponse(html_doc)
+
+
+@app.post("/admin/schools/{school_id}")
+def admin_update_school(
+    school_id: int, name: str = Form(...), website: str = Form(""), contact_email: str = Form(""), status: str = Form("active"),
+    note: str = Form(""), portal_plan: str = Form("Pilot Portal"), portal_price_eur: float = Form(49), portal_valid_until: str = Form(""),
+    portal_note: str = Form(""), portal_enabled: str | None = Form(default=None), job_quota: int = Form(50),
+):
+    if not one("SELECT id FROM schools WHERE id=?", (school_id,)):
+        raise HTTPException(404, "school not found")
+    quota = max(1, job_quota)
+    exec_sql("""UPDATE schools SET name=?,website=?,contact_email=?,status=?,note=?,portal_enabled=?,portal_plan=?,portal_price_eur=?,portal_valid_until=?,portal_note=?,job_quota=?,updated_at=? WHERE id=?""",
+             (name.strip(), website.strip(), contact_email.strip(), status.strip(), note.strip(), 1 if portal_enabled else 0, portal_plan.strip(), portal_price_eur, portal_valid_until.strip(), portal_note.strip(), quota, now(), school_id))
+    exec_sql("UPDATE courses SET provider=?,updated_at=? WHERE school_id=?", (name.strip(), now(), school_id))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/schools/{school_id}/token")
+def admin_school_token(school_id: int):
+    school = one("SELECT id,portal_token FROM schools WHERE id=?", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    token = school.get("portal_token") or new_portal_token()
+    exec_sql("UPDATE schools SET portal_token=?,portal_enabled=1,updated_at=? WHERE id=?", (token, now(), school_id))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/courses")
+def admin_create_course(
+    school_id: int = Form(...), name: str = Form(...), funding: str = Form(""), remote: str = Form(""), fit_score: int = Form(80),
+    target_titles: str = Form(""), skills: str = Form(""), location_rules: str = Form(""), language_rules: str = Form(""),
+    exclude_titles: str = Form(""), source_queries: str = Form(""), coach_note: str = Form(""),
+):
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not school or not name.strip():
+        raise HTTPException(400, "valid school and course name required")
+    cid = exec_sql("INSERT INTO courses(name,school_id,provider,funding,remote,fit_score,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                   (name.strip(), school_id, school["name"], funding.strip(), remote.strip(), int(fit_score or 0), "active", now(), now()))
+    exec_sql("""INSERT INTO search_profiles(course_id,access_mode,target_titles,skills,location_rules,language_rules,exclude_titles,source_queries,coach_note,active,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+             (cid, "Internal admin only", target_titles.strip(), skills.strip(), location_rules.strip(), language_rules.strip(), exclude_titles.strip(), source_queries.strip(), coach_note.strip(), 1, now()))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/courses/{course_id}")
+def admin_update_course(course_id: int, school_id: int = Form(...), name: str = Form(...), funding: str = Form(""), remote: str = Form(""), fit_score: int = Form(0), status: str = Form("active")):
+    school = one("SELECT * FROM schools WHERE id=?", (school_id,))
+    if not school or not one("SELECT id FROM courses WHERE id=?", (course_id,)):
+        raise HTTPException(404, "school or course not found")
+    exec_sql("UPDATE courses SET name=?,school_id=?,provider=?,funding=?,remote=?,fit_score=?,status=?,updated_at=? WHERE id=?",
+             (name.strip(), school_id, school["name"], funding.strip(), remote.strip(), int(fit_score or 0), status.strip(), now(), course_id))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{school_id}"})
+
+
+@app.post("/admin/profiles/{profile_id}")
+def admin_update_profile(profile_id: int, course_id: int = Form(...), target_titles: str = Form(""), skills: str = Form(""), location_rules: str = Form(""), language_rules: str = Form(""), exclude_titles: str = Form(""), source_queries: str = Form(""), coach_note: str = Form(""), active: str | None = Form(default=None)):
+    course = one("SELECT c.*, s.id AS school_id FROM courses c LEFT JOIN schools s ON s.id=c.school_id WHERE c.id=?", (course_id,))
+    if not course:
+        raise HTTPException(404, "course not found")
+    existing = one("SELECT id FROM search_profiles WHERE id=?", (profile_id,)) if profile_id else None
+    if existing:
+        exec_sql("""UPDATE search_profiles SET target_titles=?,skills=?,location_rules=?,language_rules=?,exclude_titles=?,source_queries=?,coach_note=?,active=?,updated_at=? WHERE id=?""",
+                 (target_titles.strip(), skills.strip(), location_rules.strip(), language_rules.strip(), exclude_titles.strip(), source_queries.strip(), coach_note.strip(), 1 if active else 0, now(), profile_id))
+    else:
+        exec_sql("""INSERT INTO search_profiles(course_id,access_mode,target_titles,skills,location_rules,language_rules,exclude_titles,source_queries,coach_note,active,updated_at)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                 (course_id, "Internal admin only", target_titles.strip(), skills.strip(), location_rules.strip(), language_rules.strip(), exclude_titles.strip(), source_queries.strip(), coach_note.strip(), 1 if active else 0, now()))
+    return Response(status_code=303, headers={"Location": f"/admin/schools/{course.get('school_id') or ''}"})
+
+
+@app.get("/admin/api/schools/{school_id}/portal-token")
+def get_or_create_school_portal_token(school_id: int) -> dict[str, Any]:
+    init_db()
+    school = one("SELECT id,name,portal_token,portal_enabled FROM schools WHERE id=?", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    token = school.get("portal_token") or new_portal_token()
+    exec_sql("UPDATE schools SET portal_token=?,portal_enabled=1,updated_at=? WHERE id=?", (token, now(), school_id))
+    return {"ok": True, "school_id": school_id, "school": school["name"], "portal_path": f"/school/{token}"}
+
+
+_SPA_SCHOOL_PATHS = {"login", "dashboard", "jobs", "profile", "reports"}
+
+
+@app.get("/school/{token}", response_class=HTMLResponse, include_in_schema=False)
+def school_portal(token: str) -> HTMLResponse:
+    if token in _SPA_SCHOOL_PATHS:
+        idx = FRONTEND_DIST / "index.html"
+        if idx.exists():
+            return HTMLResponse(idx.read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache", "X-Robots-Tag": "noindex"})
+        return HTMLResponse("<!doctype html><html><body>App not built</body></html>", status_code=503)
+    try:
+        data = school_portal_data(token)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return HTMLResponse(
+                "<!doctype html><html lang='de'><head><meta charset='utf-8'><meta name='robots' content='noindex,nofollow'><title>Portal nicht gefunden</title></head><body><h1>Portal nicht gefunden</h1></body></html>",
+                status_code=404,
+                headers=portal_headers(),
+            )
+        raise
+    return HTMLResponse(render_school_portal_html(data, token), headers=portal_headers())
+
+
+@app.get("/school/{token}/report.json", include_in_schema=False)
+def school_portal_report_json(token: str) -> Response:
+    data = school_portal_data(token)
+    return Response(json.dumps(data, ensure_ascii=False, indent=2), media_type="application/json", headers=portal_headers())
+
+
+@app.get("/school/{token}/report.csv", include_in_schema=False)
+def school_portal_report_csv(token: str) -> Response:
+    data = school_portal_data(token)
+    out = io.StringIO()
+    writer = csv.writer(out, delimiter=";")
+    writer.writerow(["school", data["school"]["name"], "generated_at", data["generated_at"]])
+    writer.writerow(["type", "course", "status", "score", "details"])
+    for c in data["courses"]:
+        writer.writerow(["course", c["name"], c["status"], c["fit_score"], f"funding={c['funding']} remote={c['remote']}"])
+    for l in data["leads"]:
+        writer.writerow(["approved_match", l["course_name"], l["status"], l["score"], l["title"]])
+    for r in data["reports"]:
+        writer.writerow(["report", r.get("report_type"), r.get("status"), "", f"{r.get('period_start')} - {r.get('period_end')}"])
+    headers = portal_headers() | {"Content-Disposition": f"attachment; filename={safe_report_name(data['school']['name'])}_portal_report.csv"}
+    return Response(out.getvalue(), media_type="text/csv; charset=utf-8", headers=headers)
+
+
+@app.get("/school/{token}/report.html", response_class=HTMLResponse, include_in_schema=False)
+def school_portal_report_html(token: str) -> HTMLResponse:
+    data = school_portal_data(token)
+    return HTMLResponse(render_school_portal_html(data, token), headers=portal_headers())
 
 
 @app.get("/api/reports/school/{school_id}")
@@ -969,6 +2115,14 @@ from ceo_metrics import register_ceo_routes
 register_ceo_routes(app, DB_PATH, REPORT_DIR, init_db)
 
 
+@app.post("/api/internal/sync-jobs")
+async def cron_sync_jobs(days: int = 7):
+    """Cron endpoint: sync new jobs from Postgres into SQLite school portal."""
+    from sync_jobs import sync
+    result = sync(days=days)
+    return result
+
+
 # ── QA Review Interface ───────────────────────────────────────────────────────
 
 _QA_CSS = """
@@ -1110,6 +2264,518 @@ async def qa_reject(match_id: str, request: Request):
     return RedirectResponse("/qa", status_code=303)
 
 
+@app.post("/api/school/login")
+async def school_login(request: Request):
+    body = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    password = (body.get("password") or "").strip()
+    if not email:
+        raise HTTPException(400, "email required")
+    school = one(
+        """SELECT id,name,contact_email,portal_token,portal_enabled,portal_plan,portal_password
+             FROM schools WHERE lower(contact_email)=? AND status<>'archived'""",
+        (email,),
+    )
+    if not school or not school.get("portal_enabled"):
+        raise HTTPException(401, "Kein aktives Portal fuer diese E-Mail-Adresse")
+    stored_hash = school.get("portal_password") or ""
+    if stored_hash:
+        if not password or not pwd_context.verify(password, stored_hash):
+            raise HTTPException(401, "Passwort falsch")
+    return {
+        "token": school["portal_token"],
+        "school_name": school["name"],
+        "plan": school.get("portal_plan") or "Pilot",
+    }
+
+
+@app.post("/api/schools/{school_id}/set-password")
+async def set_school_password(school_id: int, request: Request):
+    data = await request.json()
+    plain = (data.get("password") or "").strip()
+    if not plain:
+        exec_sql("UPDATE schools SET portal_password='',updated_at=? WHERE id=?", (now(), school_id))
+        return {"ok": True, "message": "Passwort entfernt"}
+    if len(plain) < 6:
+        raise HTTPException(400, "Passwort muss mindestens 6 Zeichen haben")
+    hashed = pwd_context.hash(plain)
+    exec_sql("UPDATE schools SET portal_password=?,updated_at=? WHERE id=?", (hashed, now(), school_id))
+    return {"ok": True, "message": "Passwort gesetzt"}
+
+
+@app.get("/api/school/me")
+async def school_me(request: Request):
+    school_id = int(request.state.school["id"])
+    s = one("SELECT id,name,contact_email,portal_plan,search_profiles FROM schools WHERE id=?", (school_id,))
+    if s:
+        return dict(s)
+    return dict(request.state.school)
+
+
+@app.post("/api/school/profile")
+async def school_profile_update(request: Request):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    sp = body.get("search_profiles", "")
+    exec_sql("UPDATE schools SET search_profiles=? WHERE id=?", (sp, school_id))
+    return {"ok": True}
+
+
+@app.get("/api/school/courses")
+async def school_courses(request: Request):
+    school_id = int(request.state.school["id"])
+    course_rows = rows(
+        """SELECT c.id, c.name, c.remote, COALESCE(c.description,'') AS description,
+                  COUNT(ja.lead_id) AS job_count
+           FROM courses c
+           LEFT JOIN leads l ON l.course_id=c.id
+           LEFT JOIN job_assignments ja ON ja.lead_id=l.id AND ja.school_id=?
+           WHERE c.school_id=? AND c.status<>'archived'
+           GROUP BY c.id ORDER BY c.name""",
+        (school_id, school_id),
+    )
+    return {"courses": [dict(r) for r in course_rows]}
+
+
+@app.patch("/api/school/courses/{course_id}")
+async def school_course_update(request: Request, course_id: int):
+    school_id = int(request.state.school["id"])
+    if not one("SELECT 1 AS x FROM courses WHERE id=? AND school_id=?", (course_id, school_id)):
+        raise HTTPException(404, "not found")
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    remote = (body.get("remote") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    exec_sql(
+        "UPDATE courses SET name=?, description=?, remote=?, updated_at=? WHERE id=?",
+        (name, description, remote, now(), course_id),
+    )
+    return {"ok": True}
+
+
+@app.get("/api/school/dashboard")
+async def school_dashboard(request: Request):
+    school_id = int(request.state.school["id"])
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    week = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    pending = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND COALESCE(l.school_status,'new')='new'""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    avg_row = one(
+        "SELECT ROUND(AVG(l.score),1) AS a FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE ja.school_id=? AND l.score>0",
+        (school_id,),
+    )
+    recent = rows(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,l.sources,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? ORDER BY l.updated_at DESC LIMIT 5""",
+        (school_id,),
+    )
+    return {
+        "kpi": {
+            "total": total,
+            "week": week,
+            "pending": pending,
+            "avg_score": avg_row["a"] if avg_row else 0,
+            "quota_used": total,
+            "quota_limit": 0,
+        },
+        "recent_leads": recent,
+    }
+
+
+@app.get("/api/school/jobs")
+async def school_jobs(
+    request: Request,
+    status: str = "all",
+    q: str = "",
+    course_id: int = 0,
+    page: int = 1,
+    per_page: int = 20,
+):
+    school_id = int(request.state.school["id"])
+    where = "ja.school_id=?"
+    params: list = [school_id]
+    if course_id:
+        where += " AND l.course_id=?"
+        params.append(course_id)
+    if status != "all":
+        where += " AND COALESCE(l.school_status,'new')=?"
+        params.append(status)
+    if q:
+        where += " AND (l.title LIKE ? OR l.provider LIKE ?)"
+        params.extend([f"%{q}%", f"%{q}%"])
+    total = (one(
+        f"SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id WHERE {where}",
+        tuple(params),
+    ) or {}).get("c", 0)
+    offset = (page - 1) * per_page
+    items = rows(
+        f"""SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                   l.why_fit,l.updated_at,l.sources
+              FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE {where}
+             ORDER BY l.updated_at DESC LIMIT ? OFFSET ?""",
+        tuple(params) + (per_page, offset),
+    )
+    return {"total": total, "page": page, "per_page": per_page, "items": items}
+
+
+@app.get("/api/school/jobs/{lead_id}")
+async def school_job_detail(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    lead = one(
+        """SELECT l.id,l.title,l.provider,l.score,COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit,l.missing_evidence,l.risks,l.sources,l.school_note,l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+            WHERE ja.school_id=? AND l.id=?""",
+        (school_id, lead_id),
+    )
+    if not lead:
+        raise HTTPException(404, "not found")
+    return lead
+
+
+@app.post("/api/school/jobs/{lead_id}/status")
+async def school_job_status(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    status = body.get("status", "")
+    note = body.get("note", "")
+    if status not in ("new", "saved", "dismissed"):
+        raise HTTPException(400, "status must be new|saved|dismissed")
+    if not one("SELECT 1 AS x FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id)):
+        raise HTTPException(404, "not found")
+    exec_sql(
+        "UPDATE leads SET school_status=?, school_note=?, updated_at=? WHERE id=?",
+        (status, note, now(), lead_id),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/school/jobs/{lead_id}")
+async def school_job_delete(request: Request, lead_id: int):
+    school_id = int(request.state.school["id"])
+    if not one("SELECT 1 AS x FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id)):
+        raise HTTPException(404, "not found")
+    exec_sql("DELETE FROM job_assignments WHERE school_id=? AND lead_id=?", (school_id, lead_id))
+    return {"ok": True}
+
+
+@app.post("/api/school/jobs")
+async def school_job_add(request: Request):
+    school_id = int(request.state.school["id"])
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "title required")
+    provider = (body.get("provider") or "").strip()
+    sources = (body.get("sources") or "").strip()
+    course_id = body.get("course_id") or None
+
+    ts = now()
+    cur = exec_sql(
+        "INSERT INTO leads(title, provider, status, score, sources, school_status, course_id, updated_at) VALUES(?,?,?,?,?,?,?,?)",
+        (title, provider, "active", 0, sources, "new", course_id, ts),
+    )
+    # get the new lead id
+    lead_id = one("SELECT id FROM leads WHERE rowid=last_insert_rowid()", ())
+    if not lead_id:
+        raise HTTPException(500, "insert failed")
+    lid = lead_id["id"]
+    exec_sql(
+        "INSERT INTO job_assignments(lead_id, school_id, assigned_at) VALUES(?,?,?)",
+        (lid, school_id, ts),
+    )
+    return {"ok": True, "id": lid}
+
+
+@app.get("/api/school/quota")
+async def school_quota(request: Request):
+    school_id = int(request.state.school["id"])
+    used = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    return {"used": used, "limit": 0, "pct": 0}
+
+
+def _period_bounds(period: str) -> tuple[str, str, str]:
+    """Return (period_start, period_end, label) for day/week/month/all."""
+    today = datetime.utcnow().date()
+    if period == "day":
+        return str(today), str(today), "Tagesbericht"
+    elif period == "week":
+        start = today - timedelta(days=6)
+        return str(start), str(today), "Wochenbericht"
+    elif period == "month":
+        start = today - timedelta(days=29)
+        return str(start), str(today), "Monatsbericht"
+    elif period == "year":
+        start = today - timedelta(days=364)
+        return str(start), str(today), "Jahresbericht"
+    return "", "", "Gesamtbericht"
+
+
+def _build_report_pdf(school_id: int, school_name: str, period: str) -> tuple[bytes, str, str, str]:
+    """Build PDF bytes, return (pdf_bytes, filename, period_start, period_end)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Table, TableStyle, Spacer
+
+    p_start, p_end, label = _period_bounds(period)
+    date_filter = ""
+    params: list = [school_id]
+    if p_start:
+        date_filter = " AND l.updated_at >= ?"
+        params.append(p_start)
+
+    leads_data = rows(
+        f"""SELECT l.title, l.provider, l.score, COALESCE(l.school_status,'new') AS school_status,
+                  l.why_fit, l.sources, l.updated_at
+             FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=?{date_filter}
+             ORDER BY l.score DESC""",
+        tuple(params),
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8, leading=10)
+    story = []
+
+    story.append(Paragraph(f"JobRadar — {label}", styles["Title"]))
+    subtitle = f"{school_name} · Stand: {datetime.utcnow().strftime('%d.%m.%Y')}"
+    if p_start:
+        subtitle += f" · Zeitraum: {p_start} – {p_end}"
+    story.append(Paragraph(subtitle, styles["Normal"]))
+    story.append(Spacer(1, 0.5*cm))
+
+    if not leads_data:
+        story.append(Paragraph("Keine Stellen in diesem Zeitraum.", styles["Normal"]))
+    else:
+        from xml.sax.saxutils import escape as xml_escape
+        STATUS_DE = {"new": "Neu", "saved": "Gespeichert", "dismissed": "Abgelehnt"}
+        link_style = ParagraphStyle("link", parent=small, textColor=colors.HexColor("#2563eb"))
+        table_data = [["Stelle", "Anbieter", "Score", "Status", "Datum"]]
+        for lead in leads_data:
+            title = lead.get("title") or ""
+            url = (lead.get("sources") or "").strip()
+            if url and url.startswith("http"):
+                title_cell = Paragraph(
+                    f'<link href="{xml_escape(url)}">{xml_escape(title)}</link>',
+                    link_style,
+                )
+            else:
+                title_cell = Paragraph(xml_escape(title), small)
+            table_data.append([
+                title_cell,
+                Paragraph(lead.get("provider") or "", small),
+                f"{lead.get('score') or 0}%",
+                STATUS_DE.get(lead.get("school_status") or "new", "Neu"),
+                (lead.get("updated_at") or "")[:10],
+            ])
+        col_widths = [7*cm, 4*cm, 1.8*cm, 2.5*cm, 2.2*cm]
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph(f"Gesamt: {len(leads_data)} Stellen", styles["Normal"]))
+
+    story.append(Spacer(1, cm))
+    story.append(Paragraph("Erstellt von JobRadar Weiterbildung · Nicht zur externen Weitergabe.", small))
+
+    doc.build(story)
+    date_str = datetime.utcnow().strftime('%Y-%m-%d')
+    filename = f"{safe_report_name(school_name)}_{period}_{date_str}.pdf"
+    return buf.getvalue(), filename, p_start or "–", p_end or date_str
+
+
+def _ensure_report(school_id: int, school_name: str, period: str) -> dict | None:
+    """Generate and save a report if one doesn't already exist for this type today."""
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    existing = one(
+        "SELECT id FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
+    )
+    if existing:
+        return existing
+    pdf_bytes, filename, p_start_out, p_end_out = _build_report_pdf(school_id, school_name, period)
+    school_dir = REPORT_DIR / safe_report_name(school_name)
+    school_dir.mkdir(exist_ok=True)
+    file_path = school_dir / filename
+    file_path.write_bytes(pdf_bytes)
+    exec_sql(
+        """INSERT INTO reports(school_id, report_type, period_start, period_end, status, file_path, created_at)
+           VALUES(?,?,?,?,?,?,?)""",
+        (school_id, label, p_start_out, p_end_out, "generated", str(file_path), now()),
+    )
+    return None
+
+
+def _auto_generate_reports(school_id: int, school_name: str) -> None:
+    """Auto-generate missing reports for all current periods."""
+    for period in ("day", "week", "month", "year"):
+        try:
+            _ensure_report(school_id, school_name, period)
+        except Exception:
+            pass
+
+
+@app.get("/api/school/report.pdf")
+async def school_report_pdf(request: Request, period: str = "all"):
+    """Download a PDF report — uses existing or generates fresh."""
+    if period not in ("day", "week", "month", "year", "all"):
+        period = "all"
+    school = request.state.school
+    school_id = int(school["id"])
+    school_name = school.get("name", "Schule")
+    _ensure_report(school_id, school_name, period)
+    _p_start, _p_end, label = _period_bounds(period)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    report = one(
+        "SELECT id, file_path FROM reports WHERE school_id=? AND report_type=? AND created_at LIKE ?",
+        (school_id, label, f"{today_str}%"),
+    )
+    if report and report.get("file_path") and Path(report["file_path"]).exists():
+        return FileResponse(Path(report["file_path"]), filename=Path(report["file_path"]).name, media_type="application/pdf")
+    pdf_bytes, filename, _, _ = _build_report_pdf(school_id, school_name, period)
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+@app.get("/api/school/reports")
+async def school_reports_list(request: Request):
+    """List reports — auto-generates missing ones for current periods first."""
+    school = request.state.school
+    school_id = int(school["id"])
+    _auto_generate_reports(school_id, school.get("name", "Schule"))
+    reports_data = rows(
+        """SELECT id, report_type, period_start, period_end, status, file_path, created_at
+             FROM reports WHERE school_id=? ORDER BY created_at DESC""",
+        (school_id,),
+    )
+    return {"reports": reports_data}
+
+
+@app.post("/api/internal/generate-reports")
+async def cron_generate_reports():
+    """Cron endpoint: auto-generate daily/weekly/monthly/yearly reports for ALL active schools."""
+    all_schools = rows("SELECT id, name FROM schools WHERE status<>'archived' AND portal_enabled=1", ())
+    generated = 0
+    for s in all_schools:
+        for period in ("day", "week", "month", "year"):
+            try:
+                result = _ensure_report(int(s["id"]), s["name"], period)
+                if result is None:
+                    generated += 1
+            except Exception:
+                pass
+    return {"generated": generated, "schools": len(all_schools)}
+
+
+@app.get("/api/school/reports/{report_id}/download")
+async def school_report_download(report_id: int, request: Request):
+    """Download a previously generated report."""
+    school_id = int(request.state.school["id"])
+    report = one("SELECT file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report or not report.get("file_path"):
+        raise HTTPException(404, "Report nicht gefunden")
+    path = Path(report["file_path"])
+    if not path.exists():
+        raise HTTPException(404, "Datei nicht mehr verfügbar")
+    return FileResponse(path, filename=path.name, media_type="application/pdf")
+
+
+@app.delete("/api/school/reports/{report_id}")
+async def school_report_delete(report_id: int, request: Request):
+    school_id = int(request.state.school["id"])
+    report = one("SELECT id, file_path FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    if not report:
+        raise HTTPException(404, "Report nicht gefunden")
+    fp = report.get("file_path")
+    if fp:
+        p = Path(fp)
+        if p.exists():
+            p.unlink()
+    exec_sql("DELETE FROM reports WHERE id=? AND school_id=?", (report_id, school_id))
+    return {"ok": True}
+
+
+@app.post("/api/admin/schools/{school_id}/send-digest")
+async def admin_send_school_digest(school_id: int, request: Request):
+    """Send weekly digest notification for a school via the existing webhook."""
+    school = one("SELECT id,name,contact_email,portal_token FROM schools WHERE id=? AND status<>'archived'", (school_id,))
+    if not school:
+        raise HTTPException(404, "school not found")
+    week_new = (one(
+        """SELECT COUNT(*) AS c FROM job_assignments ja JOIN leads l ON l.id=ja.lead_id
+             WHERE ja.school_id=? AND l.updated_at >= datetime('now','-7 days')""",
+        (school_id,),
+    ) or {}).get("c", 0)
+    total = (one("SELECT COUNT(*) AS c FROM job_assignments WHERE school_id=?", (school_id,)) or {}).get("c", 0)
+    webhook = os.getenv("JOBRADAR_APPROVE_NOTIFY_WEBHOOK") or os.getenv("JOBRADAR_NOTIFY_WEBHOOK_URL")
+    if not webhook:
+        return {"ok": False, "message": "no webhook configured"}
+    email = (school.get("contact_email") or "").strip()
+    if not email:
+        return {"ok": False, "message": "school has no contact email"}
+    portal_url = f"{PUBLIC_BASE_URL}/school/{school['portal_token']}" if school.get("portal_token") else PUBLIC_BASE_URL
+    payload = {
+        "event": "weekly_digest",
+        "school_id": school_id,
+        "school_name": school["name"],
+        "to_email": email,
+        "subject": f"JobRadar Wochenzusammenfassung: {week_new} neue Stelle{'n' if week_new != 1 else ''}",
+        "new_this_week": week_new,
+        "total": total,
+        "portal_url": portal_url,
+    }
+    import urllib.request as _ur
+    try:
+        req = _ur.Request(webhook, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"}, method="POST")
+        _ur.urlopen(req, timeout=10).read(256)
+        _record_notification("weekly_digest", 0, school_id, email, "sent")
+        return {"ok": True, "new_this_week": week_new, "total": total}
+    except Exception as exc:
+        _record_notification("weekly_digest", 0, school_id, email, "error", str(exc))
+        return {"ok": False, "message": str(exc)}
+
+
+@app.post("/api/admin/schools/send-digest-all")
+async def admin_send_digest_all(request: Request):
+    """Send weekly digest to all active schools with email and portal access."""
+    active = rows(
+        """SELECT id FROM schools WHERE status<>'archived' AND portal_enabled=1
+             AND COALESCE(contact_email,'')<>''"""
+    )
+    results = []
+    for s in active:
+        r = await admin_send_school_digest(int(s["id"]), request)
+        results.append({"school_id": s["id"], **r})
+    return {"sent": sum(1 for r in results if r.get("ok")), "total": len(results), "details": results}
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 def serve_react_app(full_path: str):
     """Serve React SPA routes after all API/download routes are registered.
@@ -1125,3 +2791,8 @@ def serve_react_app(full_path: str):
         return FileResponse(react_index)
 
     raise HTTPException(status_code=404, detail="Frontend build not found. Run sync_frontend_from_react.bat first.")
+
+
+# ???????????????????????????????????????????????????????????????????????????????
+# SCHOOL PORTAL API  /api/school/*
+# ???????????????????????????????????????????????????????????????????????????????
