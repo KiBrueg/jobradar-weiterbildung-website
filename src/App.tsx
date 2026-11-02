@@ -7,6 +7,7 @@ import ImpressumPage from '@/components/ImpressumPage';
 import DatenschutzPage from '@/components/DatenschutzPage';
 import BarrierefreiheitPage from '@/components/BarrierefreiheitPage';
 import KontaktPage from '@/components/KontaktPage';
+import HrRadarPage from '@/components/HrRadarPage';
 import BeispielReportPage from '@/components/BeispielReportPage';
 import SchulportalDemoPage from '@/components/SchulportalDemoPage';
 import { ToastProvider } from '@/components/Toast';
@@ -19,7 +20,7 @@ import { getSchoolUser } from '@/hooks/useSchoolAuth';
 
 type Route =
   | 'landing' | 'admin' | 'referenzen' | 'impressum' | 'datenschutz'
-  | 'barrierefreiheit' | 'kontakt' | 'beispiel-report' | 'schulportal-demo'
+  | 'barrierefreiheit' | 'kontakt' | 'hr-radar' | 'beispiel-report' | 'schulportal-demo'
   | 'school-login' | 'school-dashboard' | 'school-jobs' | 'school-profile' | 'school-reports';
 
 function getRoute(): Route {
@@ -30,6 +31,7 @@ function getRoute(): Route {
   if (path === '/datenschutz') return 'datenschutz';
   if (path === '/barrierefreiheit') return 'barrierefreiheit';
   if (path === '/kontakt') return 'kontakt';
+  if (path === '/hr-radar') return 'hr-radar';
   if (path === '/beispiel-report') return 'beispiel-report';
   if (path === '/schulportal-demo') return 'schulportal-demo';
   if (path === '/school/login') return 'school-login';
@@ -52,6 +54,7 @@ export function goImpressum() { nav('/impressum'); }
 export function goDatenschutz() { nav('/datenschutz'); }
 export function goBarrierefreiheit() { nav('/barrierefreiheit'); }
 export function goKontakt() { nav('/kontakt'); }
+export function goHrRadar() { nav('/hr-radar'); }
 export function goBeispielReport() { nav('/beispiel-report'); }
 export function goSchulportalDemo() { nav('/schulportal-demo'); }
 export function goSchool() { nav('/school/login'); }
@@ -115,6 +118,7 @@ export default function App() {
       : route === 'datenschutz'    ? <DatenschutzPage />
       : route === 'barrierefreiheit' ? <BarrierefreiheitPage />
       : route === 'kontakt'        ? <KontaktPage />
+      : route === 'hr-radar'       ? <HrRadarPage />
       : route === 'beispiel-report' ? <BeispielReportPage />
       : route === 'schulportal-demo' ? <SchulportalDemoPage />
       :                              <LandingPage />}
