@@ -16,10 +16,8 @@ import {
   Building2,
   Sparkles,
   Quote,
-  PlayCircle,
 } from 'lucide-react';
 import { goKontakt, goReferenzen, goSchool, goBeispielReport, goSchulportalDemo, goHrRadar } from '@/App';
-import { useToast } from '@/components/Toast';
 import PublicFooter from '@/components/PublicFooter';
 import ComparisonCarousel from '@/components/ComparisonCarousel';
 
@@ -72,7 +70,6 @@ const kpis = [
 ];
 
 export default function LandingPage() {
-  const { toast } = useToast();
   const [mobileNav, setMobileNav] = useState(false);
 
   const scrollTo = (href: string) => {
