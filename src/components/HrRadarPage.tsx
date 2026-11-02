@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { goKontakt, goLanding } from '@/App';
 import PublicFooter from '@/components/PublicFooter';
+import HrRadarComparisonCarousel from '@/components/HrRadarComparisonCarousel';
 
 const steps = [
   {
@@ -127,6 +128,15 @@ export default function HrRadarPage() {
               </ul>
             </article>
           </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-5 py-16 sm:px-8 md:py-20">
+          <div className="mx-auto mb-10 max-w-2xl text-center">
+            <span className="label">Nutzenvergleich</span>
+            <h2 className="mt-3 font-display text-3xl font-semibold tracking-tight md:text-4xl">Research-Zeit und Kapazitätswert – transparent statt mit Fantasie-KPIs</h2>
+            <p className="mt-3 leading-relaxed text-ink-600">Wie bei JobRadar zeigt der Vergleich Annahmen, Formel und Ergebnis. Die Werte sind eine veränderbare Beispielrechnung, keine Kundenstatistik oder Einspargarantie.</p>
+          </div>
+          <HrRadarComparisonCarousel />
         </section>
 
         <section id="so-funktioniert-es" className="border-y border-ink-200/60 bg-white">
