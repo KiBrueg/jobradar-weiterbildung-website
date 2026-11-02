@@ -17,7 +17,7 @@ import {
   Sparkles,
   Quote,
 } from 'lucide-react';
-import { goKontakt, goReferenzen, goSchool, goBeispielReport, goSchulportalDemo, goHrRadar } from '@/App';
+import { goKontakt, goReferenzen, goSchool, goBeispielReport, goSchulportalDemo, goMandatRadar } from '@/App';
 import PublicFooter from '@/components/PublicFooter';
 import ComparisonCarousel from '@/components/ComparisonCarousel';
 
@@ -177,7 +177,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* HR Radar — a second, clearly separated product. Existing JobRadar content remains unchanged. */}
+      {/* Mandat Radar — a second, clearly separated product. Existing JobRadar content remains unchanged. */}
       <section className="mx-auto max-w-7xl px-5 pt-5 sm:px-8 md:pt-8">
         <div className="card relative overflow-hidden border-brand-200/80 p-7 md:p-9">
           <div className="absolute inset-y-0 right-0 hidden w-1/3 bg-gradient-to-l from-brand-50 via-cyanx-50/40 to-transparent md:block" />
@@ -185,22 +185,22 @@ export default function LandingPage() {
             <div className="max-w-3xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
                 <Sparkles className="h-3.5 w-3.5" />
-                Neues Pilotkonzept für Executive Search & HR-Beratung
+                Neues Pilotkonzept für Personalberatungen & Executive Search
               </span>
               <h2 className="mt-4 font-display text-2xl font-semibold tracking-tight text-ink-900 md:text-3xl">
-                HR Radar: Pre-Vacancy Intelligence für Headhunter
+                Mandat Radar: Pre-Mandate Intelligence für Personalberatungen
               </h2>
               <p className="mt-3 max-w-2xl leading-relaxed text-ink-600">
-                Was wäre, wenn Recruiting nicht erst mit der Stellenanzeige beginnt? HR Radar strukturiert öffentliche Veränderungssignale als nachvollziehbare Research-Ansätze – bevor Unternehmen aktiv rekrutieren.
+                Was wäre, wenn neue Mandate nicht erst mit einer öffentlichen Vakanz sichtbar werden? Mandat Radar strukturiert öffentliche Veränderungssignale als nachvollziehbare Research-Ansätze – bevor Unternehmen aktiv auf Personalsuche gehen.
               </p>
               <p className="mt-3 text-sm text-ink-500">Pilotstatus: Konzeptansicht, Quellen und Prüfregeln werden transparent gemeinsam definiert.</p>
             </div>
             <div className="flex flex-wrap gap-3 md:flex-col md:items-stretch">
-              <button onClick={goHrRadar} className="btn-primary justify-center whitespace-nowrap">
-                HR Radar entdecken
+              <button onClick={goMandatRadar} className="btn-primary justify-center whitespace-nowrap">
+                Mandat Radar entdecken
                 <ArrowRight className="h-4 w-4" />
               </button>
-              <button onClick={goHrRadar} className="btn-secondary justify-center whitespace-nowrap">
+              <button onClick={goMandatRadar} className="btn-secondary justify-center whitespace-nowrap">
                 Mehr erfahren
               </button>
             </div>

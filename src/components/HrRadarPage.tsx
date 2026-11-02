@@ -47,7 +47,7 @@ const steps = [
 const benefits = [
   { icon: Users, title: 'Headhunter', text: 'Mehr Zeit für Hypothesen, Marktgespräche und passende Erstansprache statt verteilter Einzelsuche.' },
   { icon: Target, title: 'Executive Search', text: 'Strategische Trigger als Gesprächsanlass – ergänzend zu Netzwerk, Research und Mandatswissen.' },
-  { icon: Building2, title: 'HR-Beratung', text: 'Öffentlich sichtbare Veränderungen früh in die Workforce-, Standort- oder Organisationsberatung einordnen.' },
+  { icon: Building2, title: 'Direktvermittlung', text: 'Öffentlich sichtbare Veränderungen früh als Anlass für eine passende, fundierte Erstansprache einordnen.' },
   { icon: ShieldCheck, title: 'Qualitätssicherung', text: 'Jedes Signal bleibt mit Quelle und Einschätzung dokumentiert; die finale Einordnung bleibt beim Menschen.' },
 ];
 
@@ -67,7 +67,7 @@ export default function HrRadarPage() {
               <Radar className="h-5 w-5" />
             </span>
             <span className="font-display text-[17px] font-semibold tracking-tight">
-              HR <span className="font-normal text-ink-500">Radar</span>
+              Mandat <span className="font-normal text-ink-500">Radar</span>
             </span>
           </button>
           <div className="flex items-center gap-2">
@@ -86,13 +86,13 @@ export default function HrRadarPage() {
             <div className="max-w-3xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/85 px-3.5 py-1.5 text-xs font-semibold text-brand-700 shadow-soft animate-fade-up">
                 <Sparkles className="h-3.5 w-3.5" />
-                Pre-Vacancy Intelligence · Pilotkonzept
+                Pre-Mandate Intelligence · Pilotkonzept
               </span>
               <h1 className="mt-6 font-display text-4xl font-semibold leading-[1.05] tracking-tight text-ink-900 text-balance sm:text-5xl md:text-6xl animate-fade-up" style={{ animationDelay: '60ms' }}>
-                Recruiting beginnt <span className="text-brand-700">vor</span> der Stellenanzeige.
+                Neue Mandate werden <span className="text-brand-700">vor</span> der öffentlichen Suche sichtbar.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-600 animate-fade-up" style={{ animationDelay: '120ms' }}>
-                HR Radar macht öffentliche Veränderungssignale für Executive Search, HR-Beratung und datenbasiertes Recruiting recherchierbar – bevor daraus eine sichtbar ausgeschriebene Vakanz wird.
+                Mandat Radar macht öffentliche Veränderungssignale für Personalberatungen, Direktvermittlung und Executive Search recherchierbar – bevor daraus eine sichtbar ausgeschriebene Vakanz wird.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
                 <button onClick={goKontakt} className="btn-primary px-5 py-3 text-base">Pilot anfragen <ArrowRight className="h-4.5 w-4.5" /></button>
@@ -108,7 +108,7 @@ export default function HrRadarPage() {
             <article className="card border-rose-200/70 p-7">
               <div className="flex items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-50 text-rose-600"><AlertCircle className="h-5 w-5" /></span>
-                <h2 className="font-display text-xl font-semibold">Wenn Recruiting erst bei der Vakanz beginnt</h2>
+                <h2 className="font-display text-xl font-semibold">Wenn Mandatsgewinnung erst bei der Vakanz beginnt</h2>
               </div>
               <ul className="mt-5 space-y-3 text-sm leading-relaxed text-ink-700">
                 <li className="flex gap-3"><span className="font-semibold text-rose-500">×</span> Der Markt wird erst sichtbar, wenn Wettbewerb bereits öffentlich ist.</li>
@@ -119,7 +119,7 @@ export default function HrRadarPage() {
             <article className="card border-accent-200/70 p-7">
               <div className="flex items-center gap-2.5">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent-50 text-accent-600"><Radar className="h-5 w-5" /></span>
-                <h2 className="font-display text-xl font-semibold">Mit HR Radar als Research-Schicht</h2>
+                <h2 className="font-display text-xl font-semibold">Mit Mandat Radar als Research-Schicht</h2>
               </div>
               <ul className="mt-5 space-y-3 text-sm leading-relaxed text-ink-700">
                 <li className="flex gap-3"><Check className="mt-0.5 h-4 w-4 shrink-0 text-accent-600" /> Öffentliche Signale werden nach Region, Branche und Mandatsfokus strukturiert.</li>
@@ -169,7 +169,7 @@ export default function HrRadarPage() {
           <div className="card mx-auto mt-10 max-w-5xl p-2 shadow-lift">
             <div className="flex items-center gap-2 rounded-t-xl border-b border-ink-200 bg-ink-50 px-4 py-3">
               <span className="h-3 w-3 rounded-full bg-rose-300" /><span className="h-3 w-3 rounded-full bg-amber-300" /><span className="h-3 w-3 rounded-full bg-accent-300" />
-              <span className="ml-3 font-mono text-xs text-ink-400">kibrueg.de/hr-radar · Konzeptansicht</span>
+              <span className="ml-3 font-mono text-xs text-ink-400">kibrueg.de/mandat-radar · Konzeptansicht</span>
             </div>
             <div className="grid gap-4 rounded-b-xl bg-white p-5 md:grid-cols-3">
               <div className="md:col-span-2 rounded-xl border border-ink-200/70 p-5">
@@ -204,8 +204,8 @@ export default function HrRadarPage() {
           <div className="card relative mx-auto max-w-3xl overflow-hidden p-8 md:p-12">
             <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-brand-300 via-cyanx-300 to-accent-300" />
             <p className="font-display text-2xl font-medium leading-snug tracking-tight text-ink-900 md:text-3xl">„Wir suchen nicht die Vakanz. Wir finden das Unternehmen davor.“</p>
-            <p className="mx-auto mt-5 max-w-xl leading-relaxed text-ink-600">Für Executive Search, HR-Beratung und datenbasiertes Recruiting: Interesse an einem transparent abgegrenzten Pilot? Einfach melden.</p>
-            <button onClick={goKontakt} className="btn-primary mt-7 px-5 py-3 text-base">Interesse am HR-Radar-Pilot <ArrowRight className="h-4.5 w-4.5" /></button>
+            <p className="mx-auto mt-5 max-w-xl leading-relaxed text-ink-600">Für Personalberatungen, Direktvermittlung und Executive Search: Interesse an einem transparent abgegrenzten Pilot? Einfach melden.</p>
+            <button onClick={goKontakt} className="btn-primary mt-7 px-5 py-3 text-base">Interesse am Mandat-Radar-Pilot <ArrowRight className="h-4.5 w-4.5" /></button>
           </div>
         </section>
       </main>
