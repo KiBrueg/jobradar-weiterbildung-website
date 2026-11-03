@@ -57,10 +57,10 @@ const signalExamples = [
   'Öffentliche Veränderungen mit möglichem Personal- oder Partnerbedarf',
 ];
 
-const sourceFocuses = [
-  { value: 'Vergaben', label: 'öffentliche Ausschreibungen', text: 'Projekt- und Beschaffungskontext als Rechercheansatz' },
-  { value: 'Register', label: 'Unternehmenskontext', text: 'Veränderungen strukturiert zur Prüfung einordnen' },
-  { value: 'Presse', label: 'Wachstumssignale', text: 'öffentliche Hinweise auf Projekte und Bewegung' },
+const headlineMetrics = [
+  { value: 'ca. 4 Std.', label: 'freie Research-Kapazität / Woche', text: 'Beispiel: ein Fokus, 6 Std. manuell vs. 2 Std. Review' },
+  { value: 'bis zu 67 %', label: 'weniger manueller Aufwand', text: 'modellhaft bei klarer Quellenstruktur und menschlichem Review' },
+  { value: 'ca. € 12.480', label: 'Brutto-Kapazitätswert / Jahr', text: 'Beispiel: 48 Wochen × € 65 / Std., vor Pilotkosten' },
 ];
 
 export default function HrRadarPage() {
@@ -109,16 +109,17 @@ export default function HrRadarPage() {
           </div>
         </section>
 
-        <section className="mx-auto max-w-7xl px-5 pb-6 sm:px-8 md:pb-10" aria-label="Öffentliche Quellen im Fokus">
+        <section className="mx-auto max-w-7xl px-5 pb-6 sm:px-8 md:pb-10" aria-label="Beispielhafte Nutzenkennzahlen">
           <div className="grid gap-3 sm:grid-cols-3">
-            {sourceFocuses.map((source) => (
-              <article key={source.value} className="card p-5 text-center">
-                <p className="font-display text-2xl font-semibold text-brand-700">{source.value}</p>
-                <h2 className="mt-2 text-sm font-semibold text-ink-900">{source.label}</h2>
-                <p className="mt-1 text-xs leading-relaxed text-ink-500">{source.text}</p>
+            {headlineMetrics.map((metric) => (
+              <article key={metric.value} className="card p-5 text-center">
+                <p className="font-display text-2xl font-semibold text-brand-700">{metric.value}</p>
+                <h2 className="mt-2 text-sm font-semibold text-ink-900">{metric.label}</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink-500">{metric.text}</p>
               </article>
             ))}
           </div>
+          <p className="mx-auto mt-3 max-w-3xl text-center text-xs leading-relaxed text-ink-500">Beispielrechnung, keine Leistungs- oder Ertragsgarantie. Der konkrete Zeit- und Kapazitätseffekt hängt von Suchfokus, Quellen, Workflow und fachlicher Prüfung ab.</p>
         </section>
 
         <section className="mx-auto max-w-7xl px-5 py-16 sm:px-8 md:py-20">
