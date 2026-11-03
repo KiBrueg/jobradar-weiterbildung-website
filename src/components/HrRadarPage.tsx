@@ -57,6 +57,12 @@ const signalExamples = [
   'Öffentliche Veränderungen mit möglichem Personal- oder Partnerbedarf',
 ];
 
+const sourceFocuses = [
+  { value: 'Vergaben', label: 'öffentliche Ausschreibungen', text: 'Projekt- und Beschaffungskontext als Rechercheansatz' },
+  { value: 'Register', label: 'Unternehmenskontext', text: 'Veränderungen strukturiert zur Prüfung einordnen' },
+  { value: 'Presse', label: 'Wachstumssignale', text: 'öffentliche Hinweise auf Projekte und Bewegung' },
+];
+
 export default function HrRadarPage() {
   return (
     <div className="min-h-screen overflow-x-hidden bg-ink-50 text-ink-900">
@@ -86,20 +92,32 @@ export default function HrRadarPage() {
             <div className="max-w-3xl">
               <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/85 px-3.5 py-1.5 text-xs font-semibold text-brand-700 shadow-soft animate-fade-up">
                 <Sparkles className="h-3.5 w-3.5" />
-                Pre-Mandate Intelligence · Pilotkonzept
+                Pre-Mandate Intelligence · Deutschland
               </span>
               <h1 className="mt-6 font-display text-4xl font-semibold leading-[1.05] tracking-tight text-ink-900 text-balance sm:text-5xl md:text-6xl animate-fade-up" style={{ animationDelay: '60ms' }}>
                 Neue Mandate werden <span className="text-brand-700">vor</span> der öffentlichen Suche sichtbar.
               </h1>
               <p className="mt-6 max-w-2xl text-lg leading-relaxed text-ink-600 animate-fade-up" style={{ animationDelay: '120ms' }}>
-                Mandat Radar macht öffentliche Veränderungssignale für Personalberatungen, Direktvermittlung und Executive Search recherchierbar – bevor daraus eine sichtbar ausgeschriebene Vakanz wird.
+                Mandat Radar bündelt öffentliche DE-Quellen wie Vergaben, Register und Pressemitteilungen zu recherchierbaren Veränderungssignalen – damit Personalberatungen einen potenziellen Bedarf fundiert prüfen können, bevor eine Vakanz öffentlich wird.
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-3 animate-fade-up" style={{ animationDelay: '180ms' }}>
-                <button onClick={goKontakt} className="btn-primary px-5 py-3 text-base">Pilot anfragen <ArrowRight className="h-4.5 w-4.5" /></button>
+                <button onClick={goKontakt} className="btn-primary px-5 py-3 text-base">Sample-Report anfragen <ArrowRight className="h-4.5 w-4.5" /></button>
                 <a href="#so-funktioniert-es" className="btn-secondary px-5 py-3 text-base">So funktioniert es</a>
               </div>
               <p className="mt-5 text-sm text-ink-500">Kein Ersatz für Research und Beziehungsarbeit – ein strukturierter Frühindikator für bessere Recherchefragen.</p>
             </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-7xl px-5 pb-6 sm:px-8 md:pb-10" aria-label="Öffentliche Quellen im Fokus">
+          <div className="grid gap-3 sm:grid-cols-3">
+            {sourceFocuses.map((source) => (
+              <article key={source.value} className="card p-5 text-center">
+                <p className="font-display text-2xl font-semibold text-brand-700">{source.value}</p>
+                <h2 className="mt-2 text-sm font-semibold text-ink-900">{source.label}</h2>
+                <p className="mt-1 text-xs leading-relaxed text-ink-500">{source.text}</p>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -204,8 +222,8 @@ export default function HrRadarPage() {
           <div className="card relative mx-auto max-w-3xl overflow-hidden p-8 md:p-12">
             <div className="absolute inset-x-0 top-0 h-1 rounded-t-2xl bg-gradient-to-r from-brand-300 via-cyanx-300 to-accent-300" />
             <p className="font-display text-2xl font-medium leading-snug tracking-tight text-ink-900 md:text-3xl">„Wir suchen nicht die Vakanz. Wir finden das Unternehmen davor.“</p>
-            <p className="mx-auto mt-5 max-w-xl leading-relaxed text-ink-600">Für Personalberatungen, Direktvermittlung und Executive Search: Interesse an einem transparent abgegrenzten Pilot? Einfach melden.</p>
-            <button onClick={goKontakt} className="btn-primary mt-7 px-5 py-3 text-base">Interesse am Mandat-Radar-Pilot <ArrowRight className="h-4.5 w-4.5" /></button>
+            <p className="mx-auto mt-5 max-w-xl leading-relaxed text-ink-600">Fordern Sie einen Sample-Report für Ihre Branchennische an. Wir besprechen Quellen, Suchfokus und die fachliche Prüfung transparent.</p>
+            <button onClick={goKontakt} className="btn-primary mt-7 px-5 py-3 text-base">Sample-Report anfragen <ArrowRight className="h-4.5 w-4.5" /></button>
           </div>
         </section>
       </main>
